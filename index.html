@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Classroom Tracker – Phase 1</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h2>Classroom Tracker – Live Topic Detection</h2>
+
+  <p id="keyWarning" class="warn" style="display:none">
+    No API key found. Open <b>config.js</b>, paste your OpenRouter key between the quotes, save, and refresh this page.
+  </p>
+
+  <label>Subject / level of the lecture</label>
+  <input id="subject" placeholder="e.g. Semiconductor devices – B.Tech 3rd year">
+
+  <label>Model</label>
+  <select id="model">
+    <option value="anthropic/claude-haiku-4.5">Claude Haiku 4.5</option>
+    <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+    <option value="openai/gpt-4o-mini">GPT-4o mini</option>
+    <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+  </select>
+
+  <button id="startBtn">Start</button>
+  <button id="stopBtn">Stop</button>
+  <p><span id="status">Idle</span> | Next window in: <span id="countdown">–</span>s</p>
+
+  <h3>Windows (every 15 s) – newest on top</h3>
+  <div id="windows"></div>
+
+  <h3>Full transcript</h3>
+  <div id="transcript"></div>
+  <p id="interim"></p>
+
+  <script src="config.js"></script>
+  <script>
+    // ---------- Settings ----------
+    const WINDOW_SECONDS = 15;
+    const API_KEY = (typeof OPENROUTER_API_KEY !== 'undefined' ? OPENROUTER_API_KEY : '').trim();
+    if (!API_KEY) document.getElementById('keyWarning').style.display = 'block';
+
+    const SYSTEM_PROMPT = `You label what a teacher is currently teaching, from a short live speech transcript.
+The transcript comes from speech recognition, so expect misheard words, filler, and half sentences.
+Reply with ONLY a JSON object, no other text:
+{
+  "topic": "short topic label, max 8 words",
+  "keywords": ["3 to 5 key terms a student would search for"],
+  "confidence": 0.0 to 1.0,
+  "on_topic": true if this is lesson content, false if it is admin, jokes, discipline or chit-chat
+}
+If the window continues the previous topic, keep the same topic label.`;
+
+    // ---------- Speech recognition (Step 1) ----------
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      document.getElementById('status').textContent = 'Speech recognition not supported – please use Google Chrome.';
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-IN';          // Indian English
+    recognition.continuous = true;       // keep listening
+    recognition.interimResults = true;   // show words before the sentence ends
+
+    let listening = false;
+    let buffer = '';           // text collected since the last cut
+    let windows = [];          // all saved windows
+    let windowTimer = null;
+    let countdownTimer = null;
+    let secondsLeft = WINDOW_SECONDS;
+    let sessionStart = null;
+    let lastCutAt = null;
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          document.getElementById('transcript').textContent += text + ' ';
+          buffer += text + ' ';
+        } else {
+          interim += text;
+        }
+      }
+      document.getElementById('interim').textContent = interim;
+    };
+
+    // Chrome stops listening after silence, so restart it automatically
+    recognition.onend = () => { if (listening) recognition.start(); };
+    recognition.onerror = (e) => {
+      if (e.error === 'no-speech') return;   // normal during pauses
+      document.getElementById('status').textContent = 'Error: ' + e.error;
+    };
+
+    document.getElementById('startBtn').onclick = () => {
+      if (listening) return;
+      listening = true;
+      recognition.start();
+      document.getElementById('status').textContent = 'Listening…';
+
+      sessionStart = lastCutAt = Date.now();
+      secondsLeft = WINDOW_SECONDS;
+      document.getElementById('countdown').textContent = secondsLeft;
+      windowTimer = setInterval(cutWindow, WINDOW_SECONDS * 1000);
+      countdownTimer = setInterval(() => {
+        secondsLeft = secondsLeft <= 1 ? WINDOW_SECONDS : secondsLeft - 1;
+        document.getElementById('countdown').textContent = secondsLeft;
+      }, 1000);
+    };
+
+    document.getElementById('stopBtn').onclick = () => {
+      if (!listening) return;
+      listening = false;
+      recognition.stop();
+      clearInterval(windowTimer);
+      clearInterval(countdownTimer);
+      if (buffer.trim()) cutWindow();   // save the last partial window
+      document.getElementById('status').textContent = 'Stopped';
+      document.getElementById('countdown').textContent = '–';
+    };
+
+    // ---------- 15-second windows (Step 2) ----------
+    function cutWindow() {
+      const now = Date.now();
+      const w = {
+        index: windows.length + 1,
+        startSec: Math.round((lastCutAt - sessionStart) / 1000),
+        endSec: Math.round((now - sessionStart) / 1000),
+        text: buffer.trim()
+      };
+      lastCutAt = now;
+      windows.push(w);
+      buffer = '';
+      renderWindow(w);
+      detectTopic(w);
+      console.log('Window', w);
+    }
+
+    function renderWindow(w) {
+      const div = document.createElement('div');
+      div.className = 'window' + (w.text ? '' : ' empty');
+      div.innerHTML = `<small>#${w.index} · ${w.startSec}s – ${w.endSec}s · ${w.text.split(/\s+/).filter(Boolean).length} words</small><br>`
+                    + (w.text || '(silence)')
+                    + `<div class="topic" id="topic-${w.index}">${w.text ? '⏳ detecting topic…' : ''}</div>`
+                    + `<div class="meta" id="meta-${w.index}"></div>`;
+      document.getElementById('windows').prepend(div);
+    }
+
+    // ---------- Topic extraction via OpenRouter (Step 3) ----------
+    async function detectTopic(w) {
+      const topicEl = document.getElementById('topic-' + w.index);
+      const metaEl  = document.getElementById('meta-' + w.index);
+      if (!w.text) { w.topic = null; return; }           // skip silent windows
+      if (!API_KEY) { topicEl.innerHTML = '<span class="err">No API key – add it in config.js</span>'; return; }
+
+      const prev = windows[w.index - 2];                  // the window before this one
+      const subject = document.getElementById('subject').value.trim() || 'unknown';
+      const model = document.getElementById('model').value;
+
+      const userMsg =
+`Subject: ${subject}
+Previous topic: ${prev?.topic || '(none)'}
+Previous window text: ${prev?.text || '(none)'}
+CURRENT window text: ${w.text}`;
+
+      const t0 = performance.now();
+      try {
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + API_KEY,
+            'HTTP-Referer': location.origin,
+            'X-Title': 'Classroom Tracker'
+          },
+          body: JSON.stringify({
+            model: model,
+            max_tokens: 200,
+            temperature: 0.2,
+            messages: [
+              { role: 'system', content: SYSTEM_PROMPT },
+              { role: 'user',   content: userMsg }
+            ]
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error?.message || 'HTTP ' + res.status);
+
+        const raw = data.choices[0].message.content;
+        const result = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+
+        w.topic      = result.topic;
+        w.keywords   = result.keywords || [];
+        w.confidence = result.confidence;
+        w.onTopic    = result.on_topic;
+        w.model      = model;
+        w.latencyMs  = Math.round(performance.now() - t0);
+
+        topicEl.textContent = (w.onTopic ? '📘 ' : '💬 ') + w.topic;
+        metaEl.textContent  = `${model} · keywords: ${w.keywords.join(', ')} · confidence ${w.confidence} · ${w.latencyMs} ms`;
+        console.log('Topic', w);
+      } catch (err) {
+        topicEl.innerHTML = `<span class="err">Error: ${err.message}</span>`;
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
