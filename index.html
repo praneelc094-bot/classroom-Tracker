@@ -27,7 +27,60 @@
   <button id="stopBtn">Stop</button>
   <p><span id="status">Idle</span> | Next window in: <span id="countdown">–</span>s</p>
 
+  <div id="display" class="display">
+    <div class="display-head">
+      <span>
+        <span class="pill" id="dispState">Idle</span>
+        <span id="dispTopic" class="disp-topic">Waiting for a lesson topic…</span>
+      </span>
+      <span class="disp-controls">
+        <button id="openProjector" title="Open the projector screen in a new window">🖥 Open projector screen</button>
+        <span id="projStatus" class="meta">projector: not open</span>
+      </span>
+    </div>
+    <div class="display-img">
+      <img id="dispImg" alt="" style="display:none">
+      <p id="dispEmpty" class="meta">Suggested images appear here. Nothing goes to the projector until you approve it.</p>
+    </div>
+    <p id="dispCaption" class="caption"></p>
+    <div class="approve-bar">
+      <button id="approveBtn" class="btn-approve" disabled>✅ Show on projector <kbd>A</kbd></button>
+      <button id="rejectBtn" class="btn-reject" disabled>❌ Wrong – next image <kbd>N</kbd></button>
+      <button id="prevImg" disabled>◀</button><span id="imgCount" class="meta"></span><button id="nextImg" disabled>▶</button>
+      <button id="skipBtn" disabled>🚫 Skip topic <kbd>S</kbd></button>
+      <span class="spacer"></span>
+      <button id="pauseBtn" title="Stop new suggestions while you go on a tangent">⏸ Pause suggestions</button>
+      <button id="clearProjBtn" title="Blank the projector">⬛ Blank projector</button>
+    </div>
+    <p class="meta">On projector now: <span id="onProjector">nothing</span></p>
+  </div>
+
+  <details id="testBox" class="testbox">
+    <summary><b>🧪 Test with a transcript</b> (no microphone needed)</summary>
+    <p class="meta">
+      Paste a lecture transcript or load a .txt file. Timestamps like <code>0:15</code> or <code>00:01:23</code> are removed automatically.
+      Optional: put a line like <code>## PN junction</code> before each part to mark the <i>expected</i> topic – it is shown next to the detected topic to make judging easy, and is never sent to the AI.
+    </p>
+    <input type="file" id="fileInput" accept=".txt,.md,.srt,.vtt">
+    <textarea id="transcriptInput" rows="8" placeholder="Paste transcript here…"></textarea>
+    <label>Words per 15-second window (≈ speaking speed: 30 slow · 38 normal · 45 fast)</label>
+    <input id="wordsPerWindow" type="number" value="38" min="10" max="120">
+    <button id="runTranscriptBtn">▶ Run transcript</button>
+    <span id="runStatus" class="meta"></span>
+  </details>
+
+  <div id="stats" class="stats">
+    <b>Accuracy:</b> <span id="acc">–</span>
+    · judged <span id="judged">0</span> / <span id="total">0</span> windows
+    · avg latency <span id="lat">–</span>
+    <div id="perModel" class="meta"></div>
+    <div class="meta"><b>Images:</b> <span id="imgStats">–</span></div>
+    <button id="exportBtn">⬇ Export CSV</button>
+    <button id="clearBtn">🗑 Clear windows</button>
+  </div>
+
   <h3>Windows (every 15 s) – newest on top</h3>
+  <p class="meta">Mark each detected topic ✅ correct or ❌ wrong. If wrong, type what the topic actually was.</p>
   <div id="windows"></div>
 
   <h3>Full transcript</h3>
@@ -48,7 +101,8 @@ Reply with ONLY a JSON object, no other text:
   "topic": "short topic label, max 8 words",
   "keywords": ["3 to 5 key terms a student would search for"],
   "confidence": 0.0 to 1.0,
-  "on_topic": true if this is lesson content, false if it is admin, jokes, discipline or chit-chat
+  "on_topic": true if this is lesson content, false if it is admin, jokes, discipline or chit-chat,
+  "image_query": "3 to 6 word search query to find a clear teaching diagram of this topic on Wikimedia Commons, e.g. 'p-n junction depletion region diagram'"
 }
 If the window continues the previous topic, keep the same topic label.`;
 
@@ -93,7 +147,7 @@ If the window continues the previous topic, keep the same topic label.`;
     };
 
     document.getElementById('startBtn').onclick = () => {
-      if (listening) return;
+      if (listening || runningTranscript) return;
       listening = true;
       recognition.start();
       document.getElementById('status').textContent = 'Listening…';
@@ -141,8 +195,16 @@ If the window continues the previous topic, keep the same topic label.`;
       div.className = 'window' + (w.text ? '' : ' empty');
       div.innerHTML = `<small>#${w.index} · ${w.startSec}s – ${w.endSec}s · ${w.text.split(/\s+/).filter(Boolean).length} words</small><br>`
                     + (w.text || '(silence)')
+                    + (w.expected ? `<div class="expected">🎯 expected: ${w.expected}</div>` : '')
                     + `<div class="topic" id="topic-${w.index}">${w.text ? '⏳ detecting topic…' : ''}</div>`
-                    + `<div class="meta" id="meta-${w.index}"></div>`;
+                    + `<div class="meta" id="meta-${w.index}"></div>`
+                    + `<div id="thumb-${w.index}"></div>`
+                    + `<div class="judge" id="judge-${w.index}" style="display:none">
+                         <button onclick="judge(${w.index}, true)">✅ Correct</button>
+                         <button onclick="judge(${w.index}, false)">❌ Wrong</button>
+                         <input id="fix-${w.index}" placeholder="Actual topic (if wrong)" style="display:none"
+                                oninput="windows[${w.index - 1}].correctTopic = this.value">
+                       </div>`;
       document.getElementById('windows').prepend(div);
     }
 
@@ -194,16 +256,352 @@ CURRENT window text: ${w.text}`;
         w.confidence = result.confidence;
         w.onTopic    = result.on_topic;
         w.model      = model;
+        w.imageQuery = result.image_query || '';
         w.latencyMs  = Math.round(performance.now() - t0);
 
         topicEl.textContent = (w.onTopic ? '📘 ' : '💬 ') + w.topic;
         metaEl.textContent  = `${model} · keywords: ${w.keywords.join(', ')} · confidence ${w.confidence} · ${w.latencyMs} ms`;
+        document.getElementById('judge-' + w.index).style.display = 'block';
+        updateStats();
+        updateDisplay(w);
         console.log('Topic', w);
       } catch (err) {
         topicEl.innerHTML = `<span class="err">Error: ${err.message}</span>`;
         console.error(err);
       }
     }
+
+    // ---------- Evaluation log (Step 4) ----------
+    function judge(index, correct) {
+      const w = windows[index - 1];
+      w.verdict = correct ? 'correct' : 'wrong';
+      const box = document.getElementById('judge-' + index);
+      const [okBtn, badBtn] = box.querySelectorAll('button');
+      okBtn.classList.toggle('picked', correct);
+      badBtn.classList.toggle('picked', !correct);
+      const fix = document.getElementById('fix-' + index);
+      fix.style.display = correct ? 'none' : 'block';
+      if (!correct) fix.focus();
+      updateStats();
+    }
+
+    function updateStats() {
+      const withTopic = windows.filter(w => w.topic);
+      const judged = withTopic.filter(w => w.verdict);
+      const correct = judged.filter(w => w.verdict === 'correct').length;
+      const lats = withTopic.map(w => w.latencyMs).filter(Boolean);
+
+      document.getElementById('total').textContent = withTopic.length;
+      document.getElementById('judged').textContent = judged.length;
+      const accEl = document.getElementById('acc');
+      if (judged.length) {
+        const pct = Math.round(100 * correct / judged.length);
+        accEl.textContent = `${pct}% (${correct}/${judged.length})`;
+        accEl.className = pct >= 80 ? 'good' : 'bad';
+      } else { accEl.textContent = '–'; accEl.className = ''; }
+      document.getElementById('lat').textContent =
+        lats.length ? Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) + ' ms' : '–';
+
+      // image approvals (Phase 2 metric)
+      const decided = windows.filter(w => ['approved', 'skipped'].includes(w.imageVerdict));
+      const approved = decided.filter(w => w.imageVerdict === 'approved');
+      const firstTry = approved.filter(w => w.imageTries === 1).length;
+      document.getElementById('imgStats').textContent = decided.length
+        ? `${approved.length}/${decided.length} topics got an approved image · ${firstTry} on the first try`
+        : '–';
+
+      // accuracy per model, to compare models
+      const byModel = {};
+      judged.forEach(w => {
+        byModel[w.model] = byModel[w.model] || { ok: 0, n: 0 };
+        byModel[w.model].n++;
+        if (w.verdict === 'correct') byModel[w.model].ok++;
+      });
+      document.getElementById('perModel').textContent = Object.entries(byModel)
+        .map(([m, s]) => `${m}: ${Math.round(100 * s.ok / s.n)}% (${s.ok}/${s.n})`).join(' · ');
+    }
+
+    function csvCell(v) {
+      if (v === undefined || v === null) return '';
+      const s = Array.isArray(v) ? v.join('; ') : String(v);
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+
+    document.getElementById('exportBtn').onclick = () => {
+      if (!windows.length) { alertBox('Nothing to export yet.'); return; }
+      const subject = document.getElementById('subject').value.trim();
+      const cols = ['window', 'start_s', 'end_s', 'subject', 'model', 'transcript', 'topic', 'keywords',
+                    'confidence', 'on_topic', 'latency_ms', 'expected_topic', 'verdict', 'correct_topic', 'source', 'image_query', 'image_verdict', 'image_tries', 'image_shown'];
+      const rows = windows.map(w => [w.index, w.startSec, w.endSec, subject, w.model, w.text, w.topic,
+                    w.keywords, w.confidence, w.onTopic, w.latencyMs, w.expected, w.verdict, w.correctTopic,
+                    w.source || 'live', w.imageQuery, w.imageVerdict, w.imageTries, w.imageShown].map(csvCell).join(','));
+      const csv = '\uFEFF' + cols.join(',') + '\n' + rows.join('\n');   // BOM so Excel reads it correctly
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      a.download = `lecture-eval-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`;
+      a.click();
+    };
+
+    document.getElementById('clearBtn').onclick = () => {
+      if (listening) { alertBox('Stop listening before clearing.'); return; }
+      windows = []; buffer = '';
+      document.getElementById('windows').innerHTML = '';
+      document.getElementById('transcript').textContent = '';
+      display = { ...display, topic: null, images: [], i: 0, query: '', win: null, state: 'idle' };
+      renderDisplay();
+      updateStats();
+    };
+
+    function alertBox(msg) {            // on-page message instead of a blocking alert()
+      document.getElementById('status').textContent = msg;
+    }
+
+    // ---------- Phase 2: suggest images, teacher approves, projector shows ----------
+    const MIN_CONFIDENCE = 0.5;      // ignore shaky topic guesses
+    let display = { topic: null, images: [], i: 0, paused: false, query: '', win: null, state: 'idle' };
+    let projectorNow = null;         // what the projector is showing
+    const imageCache = {};
+    const channel = new BroadcastChannel('classroom-tracker');   // talks to projector.html
+
+    // Search Wikimedia Commons (free, no key, educational diagrams with licences)
+    async function searchImages(query) {
+      if (imageCache[query]) return imageCache[query];
+      const url = 'https://commons.wikimedia.org/w/api.php?' + new URLSearchParams({
+        action: 'query', format: 'json', origin: '*',
+        generator: 'search', gsrsearch: query, gsrnamespace: '6', gsrlimit: '15',
+        prop: 'imageinfo', iiprop: 'url|mime|extmetadata', iiurlwidth: '1600',
+        iiextmetadatafilter: 'Artist|LicenseShortName'
+      });
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Wikimedia HTTP ' + res.status);
+      const data = await res.json();
+      const strip = s => (s || '').replace(/<[^>]+>/g, '').trim();
+      const images = Object.values(data.query?.pages || {})
+        .sort((a, b) => a.index - b.index)                       // keep search ranking
+        .map(p => {
+          const ii = p.imageinfo?.[0];
+          if (!ii || !/^image\/(png|jpeg|gif|webp|svg\+xml)$/.test(ii.mime)) return null;   // skip PDFs, videos, audio
+          const m = ii.extmetadata || {};
+          return {
+            src: ii.thumburl || ii.url,
+            page: ii.descriptionurl,
+            title: p.title.replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' '),
+            artist: strip(m.Artist?.value),
+            license: strip(m.LicenseShortName?.value)
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 8);
+      imageCache[query] = images;
+      return images;
+    }
+
+    // Called after every detected topic; only makes a new suggestion when the topic really changes
+    async function updateDisplay(w) {
+      if (!w.topic || !w.onTopic || (w.confidence ?? 1) < MIN_CONFIDENCE) return;   // chit-chat or unsure
+      if (display.paused || w.topic === display.topic) return;                      // paused, or same topic
+      if (display.win && display.win.imageVerdict === 'pending') display.win.imageVerdict = 'ignored';  // replaced before you decided
+
+      display = { ...display, topic: w.topic, images: [], i: 0, query: '', win: w, state: 'searching' };
+      w.imageVerdict = 'pending';
+      renderDisplay();
+
+      // try the model's query first, then simpler fallbacks
+      const queries = [w.imageQuery, w.topic + ' diagram', w.keywords?.[0]].filter(Boolean);
+      let images = [], used = '';
+      for (const q of queries) {
+        try { images = await searchImages(q); } catch (err) { console.error(err); images = []; }
+        if (images.length) { used = q; break; }
+      }
+      if (display.win !== w) return;   // a newer topic arrived while we were searching
+
+      display.images = images;
+      display.query = used;
+      display.state = images.length ? 'review' : 'none';
+      w.imageQuery = used || w.imageQuery;
+      w.imageTries = images.length ? 1 : 0;
+      if (!images.length) w.imageVerdict = 'none found';
+      renderDisplay();
+    }
+
+    function renderDisplay() {
+      const img = document.getElementById('dispImg');
+      const empty = document.getElementById('dispEmpty');
+      const cur = display.images[display.i];
+      const reviewing = display.state === 'review' && !!cur;
+      const labels = { idle: 'Idle', searching: 'Searching…', review: 'Approve?', none: 'No image', approved: 'On projector', skipped: 'Skipped' };
+      const pill = document.getElementById('dispState');
+      pill.textContent = display.paused ? 'Paused' : labels[display.state];
+      pill.className = 'pill pill-' + (display.paused ? 'paused' : display.state);
+
+      document.getElementById('dispTopic').textContent = display.topic || 'Waiting for a lesson topic…';
+      document.getElementById('imgCount').textContent = display.images.length ? ` ${display.i + 1}/${display.images.length} ` : '';
+      ['approveBtn', 'rejectBtn', 'prevImg', 'nextImg', 'skipBtn'].forEach(id => document.getElementById(id).disabled = !reviewing);
+
+      if (cur && display.state !== 'skipped') {
+        img.src = cur.src; img.style.display = 'block'; empty.style.display = 'none';
+        document.getElementById('dispCaption').innerHTML =
+          `${cur.title}${cur.artist ? ' – ' + cur.artist : ''}${cur.license ? ' · ' + cur.license : ''}` +
+          ` · <a href="${cur.page}" target="_blank" rel="noopener">Wikimedia Commons</a>`;
+      } else {
+        img.style.display = 'none'; img.removeAttribute('src'); empty.style.display = 'block';
+        document.getElementById('dispCaption').textContent = '';
+        empty.textContent =
+          display.state === 'searching' ? 'Searching for images…' :
+          display.state === 'none'      ? `No image found for "${display.topic}". The projector keeps its current image.` :
+          display.state === 'skipped'   ? 'Topic skipped. The projector keeps its current image.' :
+          display.state === 'review'    ? 'No more images for this topic. Press Skip.' :
+                                          'Suggested images appear here. Nothing goes to the projector until you approve it.';
+      }
+      document.getElementById('onProjector').textContent = projectorNow ? `${projectorNow.topic} – ${projectorNow.image.title}` : 'nothing';
+    }
+
+    function stepImage(d) {
+      if (display.state !== 'review' || !display.images.length) return;
+      display.i = (display.i + d + display.images.length) % display.images.length;
+      if (display.win) display.win.imageTries = Math.max(display.win.imageTries || 1, display.i + 1);
+      renderDisplay();
+    }
+
+    function sendToProjector(msg) { channel.postMessage(msg); }
+
+    function approve() {
+      const cur = display.images[display.i];
+      if (display.state !== 'review' || !cur) return;
+      projectorNow = { topic: display.topic, image: cur };
+      sendToProjector({ type: 'show', ...projectorNow });
+      display.state = 'approved';
+      if (display.win) {
+        display.win.imageVerdict = 'approved';
+        display.win.imageShown = cur.title;
+        display.win.imageTries = display.i + 1;
+        const thumb = document.getElementById('thumb-' + display.win.index);
+        if (thumb) thumb.innerHTML = `<img class="thumb" src="${cur.src}" alt=""> <span class="meta">🖥 shown after ${display.i + 1} tr${display.i ? 'ies' : 'y'}: ${cur.title}</span>`;
+      }
+      renderDisplay(); updateStats();
+    }
+
+    function reject() {
+      if (display.state !== 'review') return;
+      if (display.i < display.images.length - 1) stepImage(1);
+      else { display.i = display.images.length; renderDisplay(); }   // ran out of images
+    }
+
+    function skipTopic() {
+      if (display.state !== 'review') return;
+      display.state = 'skipped';
+      if (display.win) {
+        display.win.imageVerdict = 'skipped';
+        const thumb = document.getElementById('thumb-' + display.win.index);
+        if (thumb) thumb.innerHTML = `<span class="meta">🚫 image skipped</span>`;
+      }
+      renderDisplay(); updateStats();
+    }
+
+    document.getElementById('approveBtn').onclick = approve;
+    document.getElementById('rejectBtn').onclick = reject;
+    document.getElementById('skipBtn').onclick = skipTopic;
+    document.getElementById('prevImg').onclick = () => stepImage(-1);
+    document.getElementById('nextImg').onclick = () => stepImage(1);
+    document.getElementById('pauseBtn').onclick = (e) => {
+      display.paused = !display.paused;
+      e.target.classList.toggle('picked', display.paused);
+      e.target.textContent = display.paused ? '▶ Resume suggestions' : '⏸ Pause suggestions';
+      renderDisplay();
+    };
+    document.getElementById('clearProjBtn').onclick = () => {
+      projectorNow = null; sendToProjector({ type: 'clear' }); renderDisplay();
+    };
+    document.getElementById('openProjector').onclick = () => {
+      window.open('projector.html', 'classroom-projector', 'width=1280,height=720');
+    };
+
+    // Projector page says hello when it opens / every few seconds -> reply with what should be on screen
+    let lastProjectorPing = 0;
+    channel.onmessage = (e) => {
+      if (e.data?.type === 'hello') {
+        lastProjectorPing = Date.now();
+        sendToProjector(projectorNow ? { type: 'show', ...projectorNow } : { type: 'clear' });
+      }
+    };
+    setInterval(() => {
+      const on = Date.now() - lastProjectorPing < 6000;
+      const el = document.getElementById('projStatus');
+      el.textContent = on ? 'projector: connected ✔' : 'projector: not open';
+      el.className = on ? 'meta good' : 'meta';
+    }, 2000);
+
+    // Keyboard shortcuts (not while typing in a box)
+    document.addEventListener('keydown', (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'a') approve();
+      else if (k === 'n') reject();
+      else if (k === 's') skipTopic();
+      else if (e.key === 'ArrowRight') stepImage(1);
+      else if (e.key === 'ArrowLeft') stepImage(-1);
+    });
+
+    // ---------- Transcript test mode (Step 5) ----------
+    let runningTranscript = false;
+
+    document.getElementById('fileInput').onchange = async (e) => {
+      const f = e.target.files[0];
+      if (f) document.getElementById('transcriptInput').value = await f.text();
+    };
+
+    // Turn raw transcript into [{word, expected}] – strips timestamps, SRT numbers and VTT headers
+    function parseTranscript(raw) {
+      const tokens = [];
+      let expected = null;
+      raw.split(/\r?\n/).forEach(line => {
+        const t = line.trim();
+        if (!t) return;
+        if (t.startsWith('##')) { expected = t.replace(/^#+\s*/, '') || null; return; }
+        if (/^WEBVTT/i.test(t) || /^\d+$/.test(t)) return;                       // VTT header / SRT index
+        if (/^[\d:.,]+\s*-->\s*[\d:.,]+/.test(t)) return;                        // SRT/VTT time range
+        const clean = t.replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, ' ').replace(/<[^>]+>/g, ' ');
+        clean.split(/\s+/).filter(Boolean).forEach(word => tokens.push({ word, expected }));
+      });
+      return tokens;
+    }
+
+    document.getElementById('runTranscriptBtn').onclick = async () => {
+      if (listening || runningTranscript) { alertBox('Stop the microphone first.'); return; }
+      if (!API_KEY) { document.getElementById('keyWarning').style.display = 'block'; return; }
+      const tokens = parseTranscript(document.getElementById('transcriptInput').value);
+      if (!tokens.length) { document.getElementById('runStatus').textContent = 'Paste a transcript first.'; return; }
+
+      const per = Math.max(10, parseInt(document.getElementById('wordsPerWindow').value) || 38);
+      const chunks = [];
+      for (let i = 0; i < tokens.length; i += per) chunks.push(tokens.slice(i, i + per));
+
+      runningTranscript = true;
+      const btn = document.getElementById('runTranscriptBtn');
+      btn.disabled = true;
+      const offset = windows.length ? windows[windows.length - 1].endSec : 0;
+
+      for (let i = 0; i < chunks.length; i++) {
+        document.getElementById('runStatus').textContent = `Window ${i + 1} of ${chunks.length}…`;
+        const c = chunks[i];
+        const w = {
+          index: windows.length + 1,
+          startSec: offset + i * WINDOW_SECONDS,
+          endSec: offset + (i + 1) * WINDOW_SECONDS,
+          text: c.map(t => t.word).join(' '),
+          expected: c[Math.floor(c.length / 2)].expected,   // label at the middle of the window
+          source: 'transcript'
+        };
+        windows.push(w);
+        renderWindow(w);
+        await detectTopic(w);          // one at a time, so each window sees the previous topic
+      }
+
+      document.getElementById('runStatus').textContent =
+        `Done – ${chunks.length} windows. Now mark each one ✅ or ❌ and export the CSV.`;
+      btn.disabled = false;
+      runningTranscript = false;
+    };
   </script>
 </body>
 </html>

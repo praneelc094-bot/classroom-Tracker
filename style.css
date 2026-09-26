@@ -17,3 +17,30 @@ button { padding: 8px 18px; margin: 12px 6px 0 0; cursor: pointer; }
 .bad  { color: #b00; font-weight: bold; }
 .judge button { padding: 4px 10px; margin: 6px 6px 0 0; }
 .judge button.picked { outline: 2px solid #333; background: #fff; }
+.testbox { background: #f3f1fa; border: 1px solid #d9d3ee; padding: 10px 14px; margin-top: 16px; }
+.testbox summary { cursor: pointer; }
+.testbox textarea { width: 100%; box-sizing: border-box; font-family: inherit; padding: 6px; margin-top: 6px; }
+.expected { margin-top: 6px; color: #5a3fa0; font-size: 14px; }
+code { background: #eee; padding: 0 4px; }
+/* Phase 2 – image display */
+.display { background: #fff; border: 2px solid #1a5c3a; border-radius: 8px; padding: 10px 14px; margin: 16px 0; }
+.display-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.disp-topic { font-size: 20px; font-weight: bold; color: #1a5c3a; }
+.disp-controls button { margin: 0 2px; padding: 4px 10px; }
+.display-img { display: flex; justify-content: center; align-items: center; min-height: 260px; background: #fafafa; margin-top: 8px; }
+.display-img img { max-width: 100%; max-height: 420px; object-fit: contain; }
+.caption { font-size: 12px; color: #666; margin: 6px 0 0; }
+.thumb { height: 60px; vertical-align: middle; border: 1px solid #ddd; margin-top: 6px; background: #fff; }
+.pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #ddd; color: #333; margin-right: 8px; vertical-align: middle; }
+.pill-review { background: #ffe08a; }
+.pill-approved { background: #b8e6c6; }
+.pill-searching { background: #cfe2ff; }
+.pill-none, .pill-skipped { background: #eee; color: #888; }
+.pill-paused { background: #f5c2c7; }
+.approve-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.approve-bar .spacer { flex: 1; }
+.btn-approve { background: #1a7a3a; color: #fff; border: none; border-radius: 4px; font-weight: bold; }
+.btn-reject { background: #b33; color: #fff; border: none; border-radius: 4px; }
+.approve-bar button:disabled { opacity: .4; cursor: default; }
+kbd { font-size: 11px; background: rgba(255,255,255,.25); border: 1px solid rgba(0,0,0,.2); border-radius: 3px; padding: 0 4px; }
+button.picked { outline: 2px solid #333; }

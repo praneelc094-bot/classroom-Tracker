@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Classroom Tracker – Projector</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0e0e0e; color: #fff; font-family: sans-serif; overflow: hidden; }
+    #stage { height: 100%; display: flex; flex-direction: column; }
+    #topic { font-size: 4.2vh; font-weight: bold; padding: 2.5vh 4vw 1vh; min-height: 5vh; }
+    #frame { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 4vw; min-height: 0; }
+    #img { max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; border-radius: 6px;
+           opacity: 0; transition: opacity .5s ease; }
+    #img.visible { opacity: 1; }
+    #caption { font-size: 1.6vh; color: #888; padding: 1vh 4vw 2vh; min-height: 2vh; }
+    #waiting { color: #666; font-size: 3vh; text-align: center; }
+    #hint { position: fixed; bottom: 12px; right: 16px; font-size: 13px; color: #555; transition: opacity 1s; }
+    body:fullscreen #hint, body.fs #hint { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div id="topic"></div>
+    <div id="frame">
+      <img id="img" alt="">
+      <div id="waiting">Waiting for the teacher to approve an image…</div>
+    </div>
+    <div id="caption"></div>
+  </div>
+  <div id="hint">Drag this window to the projector, then press <b>F</b> or double-click for fullscreen</div>
+
+  <script>
+    // Receives approved images from the teacher page (index.html) – same computer, same browser
+    const channel = new BroadcastChannel('classroom-tracker');
+    const img = document.getElementById('img');
+
+    function show(msg) {
+      document.getElementById('waiting').style.display = 'none';
+      img.classList.remove('visible');
+      const next = new Image();
+      next.onload = () => {                         // swap only once the new image has loaded
+        img.src = next.src;
+        img.style.display = 'block';
+        requestAnimationFrame(() => img.classList.add('visible'));
+        document.getElementById('topic').textContent = msg.topic;
+        const i = msg.image;
+        document.getElementById('caption').textContent =
+          `${i.title}${i.artist ? ' – ' + i.artist : ''}${i.license ? ' · ' + i.license : ''} · Wikimedia Commons`;
+      };
+      next.src = msg.image.src;
+    }
+
+    function clear() {
+      img.classList.remove('visible');
+      img.style.display = 'none';
+      document.getElementById('topic').textContent = '';
+      document.getElementById('caption').textContent = '';
+      document.getElementById('waiting').style.display = 'block';
+    }
+
+    channel.onmessage = (e) => {
+      if (e.data?.type === 'show') show(e.data);
+      if (e.data?.type === 'clear') clear();
+    };
+
+    // Tell the teacher page we're here (it replies with the current image), and keep saying so
+    const hello = () => channel.postMessage({ type: 'hello' });
+    hello();
+    setInterval(hello, 3000);
+
+    function toggleFullscreen() {
+      document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    }
+    document.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'f') toggleFullscreen(); });
+    document.addEventListener('dblclick', toggleFullscreen);
+    document.addEventListener('fullscreenchange', () => document.body.classList.toggle('fs', !!document.fullscreenElement));
+  </script>
+</body>
+</html>
