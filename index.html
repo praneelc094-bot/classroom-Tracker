@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h2>Classroom Tracker – Live Topic Detection</h2>
+  <h2>Classroom Tracker – Live Topic Detection <a href="history.html" style="font-size:14px;">📚 View lecture history</a></h2>
 
   <p id="keyWarning" class="warn" style="display:none">
     No API key found. Open <b>config.js</b>, paste your OpenRouter key between the quotes, save, and refresh this page.
@@ -38,21 +38,39 @@
         <span id="projStatus" class="meta">projector: not open</span>
       </span>
     </div>
-    <div class="display-img">
-      <img id="dispImg" alt="" style="display:none">
-      <p id="dispEmpty" class="meta">Suggested images appear here. Nothing goes to the projector until you approve it.</p>
+    <div class="stage-row">
+      <div class="approver-col">
+        <button id="approveBtn" class="btn-approve" disabled>✅ Show on projector <kbd>A</kbd></button>
+        <button id="rejectBtn" class="btn-reject" disabled>❌ Wrong – next image <kbd>N</kbd></button>
+        <div class="nav-row">
+          <button id="prevImg" disabled>◀</button><span id="imgCount" class="meta"></span><button id="nextImg" disabled>▶</button>
+        </div>
+        <button id="skipBtn" disabled>🚫 Skip topic <kbd>S</kbd></button>
+        <hr>
+        <button id="pauseBtn" title="Stop new suggestions while you go on a tangent">⏸ Pause suggestions</button>
+        <button id="clearProjBtn" title="Blank the projector">⬛ Blank projector</button>
+        <p class="meta">On projector now:<br><span id="onProjector">nothing</span></p>
+      </div>
+      <div class="stage-col">
+        <div class="display-img">
+          <img id="dispImg" alt="" style="display:none">
+          <p id="dispEmpty" class="meta">Suggested images appear here. Nothing goes to the projector until you approve it.</p>
+        </div>
+        <p id="dispCaption" class="caption"></p>
+        <div class="transcript-box" style="display:none">
+          <h4>Live transcript</h4>
+          <div id="transcript"></div>
+          <p id="interim"></p>
+        </div>
+      </div>
+      <div class="windows-col">
+        <div class="windows-box">
+          <h4>Windows (every 15 s) – newest on top</h4>
+          <p class="meta">Mark each ✅ correct or ❌ wrong.</p>
+          <div id="windows"></div>
+        </div>
+      </div>
     </div>
-    <p id="dispCaption" class="caption"></p>
-    <div class="approve-bar">
-      <button id="approveBtn" class="btn-approve" disabled>✅ Show on projector <kbd>A</kbd></button>
-      <button id="rejectBtn" class="btn-reject" disabled>❌ Wrong – next image <kbd>N</kbd></button>
-      <button id="prevImg" disabled>◀</button><span id="imgCount" class="meta"></span><button id="nextImg" disabled>▶</button>
-      <button id="skipBtn" disabled>🚫 Skip topic <kbd>S</kbd></button>
-      <span class="spacer"></span>
-      <button id="pauseBtn" title="Stop new suggestions while you go on a tangent">⏸ Pause suggestions</button>
-      <button id="clearProjBtn" title="Blank the projector">⬛ Blank projector</button>
-    </div>
-    <p class="meta">On projector now: <span id="onProjector">nothing</span></p>
   </div>
 
   <details id="testBox" class="testbox">
@@ -79,15 +97,16 @@
     <button id="clearBtn">🗑 Clear windows</button>
   </div>
 
-  <h3>Windows (every 15 s) – newest on top</h3>
-  <p class="meta">Mark each detected topic ✅ correct or ❌ wrong. If wrong, type what the topic actually was.</p>
-  <div id="windows"></div>
-
-  <h3>Full transcript</h3>
-  <div id="transcript"></div>
-  <p id="interim"></p>
+  <div class="save-bar">
+    <input id="sessionName" placeholder="Session name (e.g. Physics – PN Junction – Sept 27)" />
+    <button id="saveBtn">💾 Save Session</button>
+    <span id="saveStatus" class="meta"></span>
+    <a href="history.html" class="meta save-history-link">📂 View saved sessions</a>
+  </div>
 
   <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="supabase-client.js"></script>
   <script>
     // ---------- Settings ----------
     const WINDOW_SECONDS = 15;
@@ -124,6 +143,7 @@ If the window continues the previous topic, keep the same topic label.`;
     let secondsLeft = WINDOW_SECONDS;
     let sessionStart = null;
     let lastCutAt = null;
+    let currentLectureId = null;   // Supabase lectures.id for the session in progress
 
     recognition.onresult = (event) => {
       let interim = '';
@@ -155,6 +175,8 @@ If the window continues the previous topic, keep the same topic label.`;
       sessionStart = lastCutAt = Date.now();
       secondsLeft = WINDOW_SECONDS;
       document.getElementById('countdown').textContent = secondsLeft;
+      CT.startLecture({ subject: document.getElementById('subject').value.trim(), model: document.getElementById('model').value, source: 'live' })
+        .then(id => currentLectureId = id);
       windowTimer = setInterval(cutWindow, WINDOW_SECONDS * 1000);
       countdownTimer = setInterval(() => {
         secondsLeft = secondsLeft <= 1 ? WINDOW_SECONDS : secondsLeft - 1;
@@ -171,6 +193,7 @@ If the window continues the previous topic, keep the same topic label.`;
       if (buffer.trim()) cutWindow();   // save the last partial window
       document.getElementById('status').textContent = 'Stopped';
       document.getElementById('countdown').textContent = '–';
+      if (currentLectureId) { CT.endLecture(currentLectureId, windows.length); currentLectureId = null; }
     };
 
     // ---------- 15-second windows (Step 2) ----------
@@ -203,7 +226,7 @@ If the window continues the previous topic, keep the same topic label.`;
                          <button onclick="judge(${w.index}, true)">✅ Correct</button>
                          <button onclick="judge(${w.index}, false)">❌ Wrong</button>
                          <input id="fix-${w.index}" placeholder="Actual topic (if wrong)" style="display:none"
-                                oninput="windows[${w.index - 1}].correctTopic = this.value">
+                                oninput="fixTopic(${w.index}, this.value)">
                        </div>`;
       document.getElementById('windows').prepend(div);
     }
@@ -264,6 +287,7 @@ CURRENT window text: ${w.text}`;
         document.getElementById('judge-' + w.index).style.display = 'block';
         updateStats();
         updateDisplay(w);
+        if (currentLectureId) CT.saveWindow(currentLectureId, w);
         console.log('Topic', w);
       } catch (err) {
         topicEl.innerHTML = `<span class="err">Error: ${err.message}</span>`;
@@ -283,6 +307,16 @@ CURRENT window text: ${w.text}`;
       fix.style.display = correct ? 'none' : 'block';
       if (!correct) fix.focus();
       updateStats();
+      if (currentLectureId) CT.saveWindow(currentLectureId, w);
+    }
+
+    let fixTopicTimer = null;
+    function fixTopic(index, value) {
+      windows[index - 1].correctTopic = value;
+      clearTimeout(fixTopicTimer);   // debounce so we don't save on every keystroke
+      fixTopicTimer = setTimeout(() => {
+        if (currentLectureId) CT.saveWindow(currentLectureId, windows[index - 1]);
+      }, 600);
     }
 
     function updateStats() {
@@ -351,6 +385,35 @@ CURRENT window text: ${w.text}`;
       renderDisplay();
       updateStats();
     };
+
+    // ---------- Save session to localStorage ----------
+    document.getElementById('saveBtn').onclick = () => {
+      if (!windows.length) { document.getElementById('saveStatus').textContent = 'Nothing to save yet.'; return; }
+      const name = document.getElementById('sessionName').value.trim()
+                   || `Session ${new Date().toLocaleString()}`;
+      const subject = document.getElementById('subject').value.trim();
+      const record = {
+        id: Date.now(),
+        name,
+        subject,
+        date: new Date().toISOString(),
+        windows: windows.map(w => ({
+          index: w.index, startSec: w.startSec, endSec: w.endSec,
+          text: w.text, topic: w.topic, keywords: w.keywords,
+          confidence: w.confidence, onTopic: w.onTopic, model: w.model,
+          latencyMs: w.latencyMs, verdict: w.verdict, correctTopic: w.correctTopic,
+          imageQuery: w.imageQuery, imageVerdict: w.imageVerdict, imageShown: w.imageShown
+        }))
+      };
+      const existing = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
+      existing.push(record);
+      localStorage.setItem('classroomSessions', JSON.stringify(existing));
+      document.getElementById('saveStatus').textContent = `✓ Saved "${name}"!`;
+      setTimeout(() => document.getElementById('saveStatus').textContent = '', 3000);
+    };
+    document.getElementById('sessionName').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('saveBtn').click(); }
+    });
 
     function alertBox(msg) {            // on-page message instead of a blocking alert()
       document.getElementById('status').textContent = msg;
@@ -477,6 +540,10 @@ CURRENT window text: ${w.text}`;
         display.win.imageTries = display.i + 1;
         const thumb = document.getElementById('thumb-' + display.win.index);
         if (thumb) thumb.innerHTML = `<img class="thumb" src="${cur.src}" alt=""> <span class="meta">🖥 shown after ${display.i + 1} tr${display.i ? 'ies' : 'y'}: ${cur.title}</span>`;
+        if (currentLectureId) {
+          CT.saveWindow(currentLectureId, display.win)
+            .then(() => CT.saveApprovedImage(currentLectureId, display.win, cur));
+        }
       }
       renderDisplay(); updateStats();
     }
@@ -494,6 +561,7 @@ CURRENT window text: ${w.text}`;
         display.win.imageVerdict = 'skipped';
         const thumb = document.getElementById('thumb-' + display.win.index);
         if (thumb) thumb.innerHTML = `<span class="meta">🚫 image skipped</span>`;
+        if (currentLectureId) CT.saveWindow(currentLectureId, display.win);
       }
       renderDisplay(); updateStats();
     }
@@ -580,6 +648,9 @@ CURRENT window text: ${w.text}`;
       const btn = document.getElementById('runTranscriptBtn');
       btn.disabled = true;
       const offset = windows.length ? windows[windows.length - 1].endSec : 0;
+      if (!currentLectureId) {
+        currentLectureId = await CT.startLecture({ subject: document.getElementById('subject').value.trim(), model: document.getElementById('model').value, source: 'transcript' });
+      }
 
       for (let i = 0; i < chunks.length; i++) {
         document.getElementById('runStatus').textContent = `Window ${i + 1} of ${chunks.length}…`;
@@ -601,6 +672,7 @@ CURRENT window text: ${w.text}`;
         `Done – ${chunks.length} windows. Now mark each one ✅ or ❌ and export the CSV.`;
       btn.disabled = false;
       runningTranscript = false;
+      if (currentLectureId) { await CT.endLecture(currentLectureId, windows.length); currentLectureId = null; }
     };
   </script>
 </body>

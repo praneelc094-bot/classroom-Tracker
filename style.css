@@ -1,4 +1,4 @@
-body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 16px; }
+body { font-family: sans-serif; max-width: 1300px; margin: 40px auto; padding: 0 16px; }
 label { display: block; margin-top: 10px; font-size: 14px; color: #444; }
 input, select { padding: 6px; margin: 4px 0; width: 100%; box-sizing: border-box; }
 button { padding: 8px 18px; margin: 12px 6px 0 0; cursor: pointer; }
@@ -37,10 +37,42 @@ code { background: #eee; padding: 0 4px; }
 .pill-searching { background: #cfe2ff; }
 .pill-none, .pill-skipped { background: #eee; color: #888; }
 .pill-paused { background: #f5c2c7; }
-.approve-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-.approve-bar .spacer { flex: 1; }
 .btn-approve { background: #1a7a3a; color: #fff; border: none; border-radius: 4px; font-weight: bold; }
 .btn-reject { background: #b33; color: #fff; border: none; border-radius: 4px; }
-.approve-bar button:disabled { opacity: .4; cursor: default; }
+.approver-col button:disabled { opacity: .4; cursor: default; }
 kbd { font-size: 11px; background: rgba(255,255,255,.25); border: 1px solid rgba(0,0,0,.2); border-radius: 3px; padding: 0 4px; }
 button.picked { outline: 2px solid #333; }
+
+/* Stage layout: image approver on the left, image + transcript stacked on the right */
+.stage-row { display: flex; align-items: flex-start; gap: 16px; margin-top: 8px; }
+.approver-col { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; }
+.approver-col button { width: 100%; margin: 0 0 8px 0; }
+.approver-col .nav-row { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 8px; }
+.approver-col .nav-row button { width: auto; flex: 1; margin: 0; }
+.approver-col hr { width: 100%; border: none; border-top: 1px solid #ddd; margin: 4px 0 10px; }
+.stage-col { flex: 1; min-width: 0; }
+.stage-col .display-img { margin-top: 0; }
+.transcript-box { margin-top: 12px; }
+.transcript-box h4 { margin: 0 0 6px; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: .03em; }
+.transcript-box #transcript { max-height: 180px; overflow-y: auto; }
+
+/* Windows log, now living in the right column */
+.windows-col { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; max-height: calc(100vh - 120px); position: sticky; top: 20px; }
+.windows-col .windows-box { display: flex; flex-direction: column; flex: 1; overflow: hidden; margin-top: 0; }
+.windows-col h4 { margin: 0 0 4px; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: .03em; }
+.windows-col #windows { flex: 1; overflow-y: auto; padding-right: 8px; }
+.windows-box .window { margin: 0 0 8px 0; font-size: 13px; }
+
+/* Save session bar */
+.save-bar { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 12px 14px; background: #f0f7ff; border: 1px solid #b8d9f8; border-radius: 6px; flex-wrap: wrap; }
+.save-bar input { flex: 1; min-width: 200px; margin: 0; }
+.save-bar button { margin: 0; background: #1a5c9a; color: #fff; border: none; border-radius: 4px; font-weight: bold; }
+.save-bar button:hover { background: #1448780; }
+.save-history-link { white-space: nowrap; text-decoration: none; color: #1a5c9a !important; }
+.save-history-link:hover { text-decoration: underline; }
+
+@media (max-width: 720px) {
+  .stage-row { flex-direction: column; }
+  .approver-col { width: 100%; }
+  .approver-col .windows-box #windows { max-height: 260px; }
+}
