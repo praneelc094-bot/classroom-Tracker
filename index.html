@@ -8,6 +8,18 @@
 <body>
   <h2>Classroom Tracker – Live Topic Detection <a href="history.html" style="font-size:14px;">📚 View lecture history</a></h2>
 
+  <div id="userBar" class="user-bar" style="display:none">
+    Signed in as <b id="userEmail"></b>
+    <button id="signOutBtn">Sign out</button>
+  </div>
+
+  <div id="loginGate" class="login-gate">
+    <p>Sign in with your Google account to start a session. Sessions are saved under your account.</p>
+    <button id="googleSignInBtn">🔐 Sign in with Google</button>
+    <p id="authError" class="err"></p>
+  </div>
+
+  <div id="appContent" style="display:none">
   <p id="keyWarning" class="warn" style="display:none">
     No API key found. Open <b>config.js</b>, paste your OpenRouter key between the quotes, save, and refresh this page.
   </p>
@@ -57,10 +69,9 @@
           <p id="dispEmpty" class="meta">Suggested images appear here. Nothing goes to the projector until you approve it.</p>
         </div>
         <p id="dispCaption" class="caption"></p>
-        <div class="transcript-box" style="display:none">
-          <h4>Live transcript</h4>
-          <div id="transcript"></div>
-          <p id="interim"></p>
+        <div class="transcript-box">
+          <h4>Live transcript <span id="micDot" class="mic-dot" title="Microphone status"></span></h4>
+          <div id="transcriptScroll" class="transcript-scroll"><span id="transcript"></span><span id="interim"></span></div>
         </div>
       </div>
       <div class="windows-col">
@@ -72,6 +83,7 @@
       </div>
     </div>
   </div>
+  <div id="lightbox" class="lightbox" style="display:none"><img id="lightboxImg" alt=""><p id="lightboxCap" class="caption"></p></div>
 
   <details id="testBox" class="testbox">
     <summary><b>🧪 Test with a transcript</b> (no microphone needed)</summary>
@@ -102,6 +114,7 @@
     <button id="saveBtn">💾 Save Session</button>
     <span id="saveStatus" class="meta"></span>
     <a href="history.html" class="meta save-history-link">📂 View saved sessions</a>
+  </div>
   </div>
 
   <script src="config.js"></script>
@@ -144,19 +157,30 @@ If the window continues the previous topic, keep the same topic label.`;
     let sessionStart = null;
     let lastCutAt = null;
     let currentLectureId = null;   // Supabase lectures.id for the session in progress
+    let currentLocalSessionId = null;   // localStorage session id, when continuing a locally-saved session
+
+    // Live transcript: finished sentences in black, the words still being recognised in grey italics,
+    // always scrolled to the newest text.
+    function showTranscript(finalText, interim) {
+      const box = document.getElementById('transcriptScroll');
+      if (finalText) document.getElementById('transcript').textContent += finalText;
+      document.getElementById('interim').textContent = interim;
+      box.classList.toggle('has-text', !!(document.getElementById('transcript').textContent || interim));
+      box.scrollTop = box.scrollHeight;
+    }
 
     recognition.onresult = (event) => {
-      let interim = '';
+      let interim = '', finalText = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const text = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          document.getElementById('transcript').textContent += text + ' ';
+          finalText += text + ' ';
           buffer += text + ' ';
         } else {
           interim += text;
         }
       }
-      document.getElementById('interim').textContent = interim;
+      showTranscript(finalText, interim);
     };
 
     // Chrome stops listening after silence, so restart it automatically
@@ -171,11 +195,16 @@ If the window continues the previous topic, keep the same topic label.`;
       listening = true;
       recognition.start();
       document.getElementById('status').textContent = 'Listening…';
+      document.getElementById('micDot').classList.add('live');
 
-      sessionStart = lastCutAt = Date.now();
+      // Carry on from the last window (a resumed lecture, or Start pressed again) instead of restarting at 0:00
+      const lastEnd = windows.length ? windows[windows.length - 1].endSec || 0 : 0;
+      lastCutAt = Date.now();
+      sessionStart = lastCutAt - lastEnd * 1000;
       secondsLeft = WINDOW_SECONDS;
       document.getElementById('countdown').textContent = secondsLeft;
-      CT.startLecture({ subject: document.getElementById('subject').value.trim(), model: document.getElementById('model').value, source: 'live' })
+      if (currentLectureId) CT.reopenLecture(currentLectureId);   // resumed lecture: keep saving into the same one
+      else CT.startLecture({ subject: document.getElementById('subject').value.trim(), model: document.getElementById('model').value, source: 'live' })
         .then(id => currentLectureId = id);
       windowTimer = setInterval(cutWindow, WINDOW_SECONDS * 1000);
       countdownTimer = setInterval(() => {
@@ -193,7 +222,11 @@ If the window continues the previous topic, keep the same topic label.`;
       if (buffer.trim()) cutWindow();   // save the last partial window
       document.getElementById('status').textContent = 'Stopped';
       document.getElementById('countdown').textContent = '–';
-      if (currentLectureId) { CT.endLecture(currentLectureId, windows.length); currentLectureId = null; }
+      document.getElementById('micDot').classList.remove('live');
+      showTranscript('', '');
+      // The lecture id is kept (cleared only by "Clear windows"), so Start again carries on in the same
+      // lecture and the last window's topic - which arrives after this point - can still be saved.
+      if (currentLectureId) CT.endLecture(currentLectureId, windows.length);
     };
 
     // ---------- 15-second windows (Step 2) ----------
@@ -225,6 +258,7 @@ If the window continues the previous topic, keep the same topic label.`;
                     + `<div class="judge" id="judge-${w.index}" style="display:none">
                          <button onclick="judge(${w.index}, true)">✅ Correct</button>
                          <button onclick="judge(${w.index}, false)">❌ Wrong</button>
+                         <button class="review-btn" onclick="reviewWindow(${w.index})" title="Look through image suggestions for this topic and show one on the projector">🔍 Review</button>
                          <input id="fix-${w.index}" placeholder="Actual topic (if wrong)" style="display:none"
                                 oninput="fixTopic(${w.index}, this.value)">
                        </div>`;
@@ -379,21 +413,25 @@ CURRENT window text: ${w.text}`;
     document.getElementById('clearBtn').onclick = () => {
       if (listening) { alertBox('Stop listening before clearing.'); return; }
       windows = []; buffer = '';
+      currentLectureId = null; currentLocalSessionId = null;
       document.getElementById('windows').innerHTML = '';
       document.getElementById('transcript').textContent = '';
+      showTranscript('', '');
       display = { ...display, topic: null, images: [], i: 0, query: '', win: null, state: 'idle' };
       renderDisplay();
       updateStats();
     };
 
     // ---------- Save session to localStorage ----------
+    // If this session was resumed from a previous local save (currentLocalSessionId set),
+    // saving again updates that same record instead of creating a duplicate.
     document.getElementById('saveBtn').onclick = () => {
       if (!windows.length) { document.getElementById('saveStatus').textContent = 'Nothing to save yet.'; return; }
       const name = document.getElementById('sessionName').value.trim()
                    || `Session ${new Date().toLocaleString()}`;
       const subject = document.getElementById('subject').value.trim();
       const record = {
-        id: Date.now(),
+        id: currentLocalSessionId || Date.now(),
         name,
         subject,
         date: new Date().toISOString(),
@@ -402,11 +440,13 @@ CURRENT window text: ${w.text}`;
           text: w.text, topic: w.topic, keywords: w.keywords,
           confidence: w.confidence, onTopic: w.onTopic, model: w.model,
           latencyMs: w.latencyMs, verdict: w.verdict, correctTopic: w.correctTopic,
-          imageQuery: w.imageQuery, imageVerdict: w.imageVerdict, imageShown: w.imageShown
+          imageQuery: w.imageQuery, imageVerdict: w.imageVerdict, imageShown: w.imageShown, image: w.image
         }))
       };
       const existing = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
-      existing.push(record);
+      const idx = existing.findIndex(s => s.id === record.id);
+      if (idx >= 0) existing[idx] = record; else existing.push(record);
+      currentLocalSessionId = record.id;
       localStorage.setItem('classroomSessions', JSON.stringify(existing));
       document.getElementById('saveStatus').textContent = `✓ Saved "${name}"!`;
       setTimeout(() => document.getElementById('saveStatus').textContent = '', 3000);
@@ -469,13 +509,7 @@ CURRENT window text: ${w.text}`;
       w.imageVerdict = 'pending';
       renderDisplay();
 
-      // try the model's query first, then simpler fallbacks
-      const queries = [w.imageQuery, w.topic + ' diagram', w.keywords?.[0]].filter(Boolean);
-      let images = [], used = '';
-      for (const q of queries) {
-        try { images = await searchImages(q); } catch (err) { console.error(err); images = []; }
-        if (images.length) { used = q; break; }
-      }
+      const { images, used } = await findImagesFor(w);
       if (display.win !== w) return;   // a newer topic arrived while we were searching
 
       display.images = images;
@@ -484,6 +518,46 @@ CURRENT window text: ${w.text}`;
       w.imageQuery = used || w.imageQuery;
       w.imageTries = images.length ? 1 : 0;
       if (!images.length) w.imageVerdict = 'none found';
+      renderDisplay();
+    }
+
+    // try the model's query first, then simpler fallbacks
+    async function findImagesFor(w) {
+      const queries = [w.imageQuery, w.topic + ' diagram', w.keywords?.[0]].filter(Boolean);
+      for (const q of queries) {
+        let images = [];
+        try { images = await searchImages(q); } catch (err) { console.error(err); }
+        if (images.length) return { images, used: q };
+      }
+      return { images: [], used: '' };
+    }
+
+    // "🔍 Review" on a window card: bring that window's image suggestions back into the main
+    // image panel so they can be looked through and (re-)sent to the projector.
+    // An image already shown for the window is offered first.
+    async function reviewWindow(index) {
+      const w = windows.find(x => x.index === index);
+      if (!w || !w.topic) return;
+      if (display.win && display.win !== w && display.win.imageVerdict === 'pending') display.win.imageVerdict = 'ignored';
+      const alreadyShown = !!w.image;
+      if (!alreadyShown) w.imageVerdict = 'pending';
+
+      display = { ...display, topic: w.topic, images: alreadyShown ? [w.image] : [], i: 0, query: '', win: w, state: 'searching' };
+      renderDisplay();
+      document.getElementById('display').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+      let { images, used } = await findImagesFor(w);
+      if (display.win !== w) return;   // another window was opened for review meanwhile
+      if (alreadyShown) images = [w.image, ...images.filter(im => im.src !== w.image.src)];
+
+      display.images = images;
+      display.query = used;
+      display.state = images.length ? 'review' : 'none';
+      if (!alreadyShown) {
+        w.imageQuery = used || w.imageQuery;
+        w.imageTries = images.length ? 1 : 0;
+        if (!images.length) w.imageVerdict = 'none found';
+      }
       renderDisplay();
     }
 
@@ -517,12 +591,63 @@ CURRENT window text: ${w.text}`;
                                           'Suggested images appear here. Nothing goes to the projector until you approve it.';
       }
       document.getElementById('onProjector').textContent = projectorNow ? `${projectorNow.topic} – ${projectorNow.image.title}` : 'nothing';
+      syncOnAir();
     }
+
+    // The image approved for a window, shown inside its card in the Windows log:
+    // click the thumbnail to review it full size, or send it back to the projector.
+    function renderThumb(w, note) {
+      const thumb = document.getElementById('thumb-' + w.index);
+      if (!thumb) return;
+      if (w.image?.src) {
+        thumb.innerHTML = `<img class="thumb" data-w="${w.index}" src="${w.image.src}" alt="" title="Click to review full size"> <span class="meta">${note}</span>
+          <button class="show-again" data-w="${w.index}">🖥 Show again</button>`;
+        syncOnAir();
+      } else {
+        thumb.innerHTML = note ? `<span class="meta">${note}</span>` : '';
+      }
+    }
+
+    // Mark whichever window's image is on the projector right now
+    function syncOnAir() {
+      document.querySelectorAll('#windows .show-again').forEach(b => {
+        const w = windows.find(x => x.index === Number(b.dataset.w));
+        const on = !!w?.image && projectorNow?.image?.src === w.image.src;
+        b.textContent = on ? '🖥 On projector' : '🖥 Show again';
+        b.classList.toggle('on-air', on);
+      });
+    }
+
+    function reshow(index) {
+      const w = windows.find(x => x.index === index);
+      if (!w?.image) return;
+      projectorNow = { topic: w.topic, image: w.image };
+      sendToProjector({ type: 'show', ...projectorNow });
+      renderDisplay();
+    }
+
+    function openLightbox(index) {
+      const w = windows.find(x => x.index === index);
+      if (!w?.image) return;
+      const i = w.image;
+      document.getElementById('lightboxImg').src = i.src;
+      document.getElementById('lightboxCap').textContent =
+        `${w.topic || ''} – ${i.title || ''}${i.artist ? ' – ' + i.artist : ''}${i.license ? ' · ' + i.license : ''}`;
+      document.getElementById('lightbox').style.display = 'flex';
+    }
+
+    document.getElementById('windows').addEventListener('click', (e) => {
+      const index = Number(e.target.dataset.w);
+      if (e.target.classList.contains('show-again')) reshow(index);
+      else if (e.target.classList.contains('thumb')) openLightbox(index);
+    });
+    document.getElementById('lightbox').addEventListener('click', () => { document.getElementById('lightbox').style.display = 'none'; });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.getElementById('lightbox').style.display = 'none'; });
 
     function stepImage(d) {
       if (display.state !== 'review' || !display.images.length) return;
       display.i = (display.i + d + display.images.length) % display.images.length;
-      if (display.win) display.win.imageTries = Math.max(display.win.imageTries || 1, display.i + 1);
+      if (display.win && !display.win.image) display.win.imageTries = Math.max(display.win.imageTries || 1, display.i + 1);
       renderDisplay();
     }
 
@@ -535,11 +660,12 @@ CURRENT window text: ${w.text}`;
       sendToProjector({ type: 'show', ...projectorNow });
       display.state = 'approved';
       if (display.win) {
+        const firstTime = !display.win.image;   // false when re-showing a window from Review
         display.win.imageVerdict = 'approved';
         display.win.imageShown = cur.title;
-        display.win.imageTries = display.i + 1;
-        const thumb = document.getElementById('thumb-' + display.win.index);
-        if (thumb) thumb.innerHTML = `<img class="thumb" src="${cur.src}" alt=""> <span class="meta">🖥 shown after ${display.i + 1} tr${display.i ? 'ies' : 'y'}: ${cur.title}</span>`;
+        display.win.image = cur;
+        if (firstTime) display.win.imageTries = display.i + 1;
+        renderThumb(display.win, firstTime ? `🖥 shown after ${display.i + 1} tr${display.i ? 'ies' : 'y'}: ${cur.title}` : `🖥 shown again: ${cur.title}`);
         if (currentLectureId) {
           CT.saveWindow(currentLectureId, display.win)
             .then(() => CT.saveApprovedImage(currentLectureId, display.win, cur));
@@ -557,7 +683,7 @@ CURRENT window text: ${w.text}`;
     function skipTopic() {
       if (display.state !== 'review') return;
       display.state = 'skipped';
-      if (display.win) {
+      if (display.win && !display.win.image) {   // keep the record of an image that was already shown
         display.win.imageVerdict = 'skipped';
         const thumb = document.getElementById('thumb-' + display.win.index);
         if (thumb) thumb.innerHTML = `<span class="meta">🚫 image skipped</span>`;
@@ -672,8 +798,145 @@ CURRENT window text: ${w.text}`;
         `Done – ${chunks.length} windows. Now mark each one ✅ or ❌ and export the CSV.`;
       btn.disabled = false;
       runningTranscript = false;
-      if (currentLectureId) { await CT.endLecture(currentLectureId, windows.length); currentLectureId = null; }
+      if (currentLectureId) await CT.endLecture(currentLectureId, windows.length);
     };
+
+    // ---------- Continue a previous lecture (from history.html) ----------
+    // Rebuilds a saved window's UI exactly as it looked live: topic label, judged
+    // verdict, and any image that was approved for it, so a resumed lecture reads
+    // the same as one still in progress.
+    function restoreWindow(w) {
+      renderWindow(w);
+      const topicEl = document.getElementById('topic-' + w.index);
+      const metaEl = document.getElementById('meta-' + w.index);
+      if (w.topic) {
+        topicEl.textContent = (w.onTopic ? '📘 ' : '💬 ') + w.topic;
+        const bits = [];
+        if (w.model) bits.push(w.model);
+        if (w.keywords?.length) bits.push('keywords: ' + w.keywords.join(', '));
+        if (w.confidence != null) bits.push('confidence ' + w.confidence);
+        if (w.latencyMs != null) bits.push(w.latencyMs + ' ms');
+        metaEl.textContent = bits.join(' · ');
+      }
+      if (w.topic) document.getElementById('judge-' + w.index).style.display = 'block';   // Correct / Wrong / Review
+      if (w.verdict) {
+        const judgeDiv = document.getElementById('judge-' + w.index);
+        const [okBtn, badBtn] = judgeDiv.querySelectorAll('button');
+        okBtn.classList.toggle('picked', w.verdict === 'correct');
+        badBtn.classList.toggle('picked', w.verdict === 'wrong');
+        if (w.verdict === 'wrong') {
+          const fix = document.getElementById('fix-' + w.index);
+          fix.style.display = 'block';
+          fix.value = w.correctTopic || '';
+        }
+      }
+      const thumb = document.getElementById('thumb-' + w.index);
+      if (thumb && w.imageVerdict === 'approved') {
+        renderThumb(w, w.imageShown ? `🖥 previously shown: ${w.imageShown}` : '');
+      } else if (thumb && w.imageVerdict === 'skipped') {
+        thumb.innerHTML = `<span class="meta">🚫 image skipped</span>`;
+      }
+    }
+
+    function resumeSession({ subject, model, sessionName, windowsData, lectureId, localId, lastApprovedImage }) {
+      document.getElementById('subject').value = subject || '';
+      if (model) document.getElementById('model').value = model;
+      if (sessionName) document.getElementById('sessionName').value = sessionName;
+
+      windows = [...windowsData];
+      document.getElementById('windows').innerHTML = '';
+      windows.forEach(restoreWindow);
+      document.getElementById('transcript').textContent = windows.map(w => w.text).filter(Boolean).join(' ') + (windows.length ? ' ' : '');
+      showTranscript('', '');
+
+      const lastEnd = windows.length ? windows[windows.length - 1].endSec || 0 : 0;
+      sessionStart = Date.now() - lastEnd * 1000;
+      lastCutAt = Date.now();
+      currentLectureId = lectureId || null;
+      currentLocalSessionId = localId || null;
+
+      const lastShownWin = [...windows].reverse().find(w => w.image && w.imageVerdict === 'approved');
+      projectorNow = lastApprovedImage || (lastShownWin ? { topic: lastShownWin.topic, image: lastShownWin.image } : null);
+      renderDisplay();
+      updateStats();
+      alertBox('Resumed – press Start to keep recording.');
+    }
+
+    async function resumeFromCloud(id) {
+      const detail = await CT.getLectureDetail(id);
+      if (!detail || !detail.lecture) { alertBox('Could not load that lecture.'); return; }
+      const { lecture, windows: dbWindows, images } = detail;
+      const imagesByWindow = {};
+      images.forEach(img => { (imagesByWindow[img.window_id] = imagesByWindow[img.window_id] || []).push(img); });
+
+      const windowsData = dbWindows.map(w => {
+        const lastImg = (imagesByWindow[w.id] || []).slice(-1)[0];
+        return {
+          index: w.window_index, startSec: w.start_sec, endSec: w.end_sec, text: w.transcript_text,
+          topic: w.topic, keywords: w.keywords, confidence: w.confidence, onTopic: w.on_topic,
+          model: w.model, latencyMs: w.latency_ms, verdict: w.verdict, correctTopic: w.correct_topic,
+          imageQuery: w.image_query, imageVerdict: w.image_verdict, imageTries: w.image_tries,
+          imageShown: lastImg?.title,
+          image: lastImg ? { src: lastImg.public_url || lastImg.source_url, page: lastImg.source_page, title: lastImg.title, artist: lastImg.artist, license: lastImg.license } : undefined,
+          _dbId: w.id
+        };
+      });
+
+      const lastImg = images[images.length - 1];   // most recently approved overall
+      const lastApprovedImage = lastImg ? {
+        topic: lastImg.topic || '',
+        image: { src: lastImg.public_url || lastImg.source_url, page: lastImg.source_page, title: lastImg.title, artist: lastImg.artist, license: lastImg.license }
+      } : null;
+
+      resumeSession({ subject: lecture.subject, model: lecture.model, windowsData, lectureId: lecture.id, lastApprovedImage });
+    }
+
+    function resumeFromLocal(id) {
+      const sessions = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
+      const s = sessions.find(x => x.id === id);
+      if (!s) { alertBox('Could not find that saved session.'); return; }
+      resumeSession({ subject: s.subject, sessionName: s.name, windowsData: s.windows || [], localId: s.id });
+    }
+
+    // ---------- Auth gate: the whole app requires a signed-in teacher ----------
+    function applyAuthState(user) {
+      const loggedIn = !!user;
+      document.getElementById('loginGate').style.display = loggedIn ? 'none' : 'block';
+      document.getElementById('appContent').style.display = loggedIn ? 'block' : 'none';
+      document.getElementById('userBar').style.display = loggedIn ? 'block' : 'none';
+      document.getElementById('userEmail').textContent = user?.email || '';
+      if (!loggedIn && listening) document.getElementById('stopBtn').click();
+
+      // Resume-on-login: only once, the first time we see a real signed-in user -
+      // onAuthStateChange can fire again later (token refresh, etc.) and must not re-run this.
+      if (loggedIn && !resumeHandled) {
+        resumeHandled = true;
+        const params = new URLSearchParams(location.search);
+        const resumeCloudId = params.get('resumeCloud');
+        const resumeLocalId = params.get('resumeLocal');
+        if (resumeCloudId) resumeFromCloud(resumeCloudId);
+        else if (resumeLocalId) resumeFromLocal(Number(resumeLocalId));
+      }
+    }
+    let resumeHandled = false;
+
+    document.getElementById('googleSignInBtn').onclick = async () => {
+      document.getElementById('authError').textContent = '';
+      try { await CT.signInWithGoogle(); }
+      catch (err) { document.getElementById('authError').textContent = 'Sign-in failed: ' + err.message; }
+    };
+    document.getElementById('signOutBtn').onclick = () => CT.signOut();
+
+    if (!CT.ready) {
+      document.getElementById('loginGate').innerHTML =
+        '<p class="err">Storage isn\'t configured yet. Open <b>config.js</b> and fill in SUPABASE_URL and SUPABASE_ANON_KEY, then refresh.</p>';
+    } else {
+      // onAuthChange fires immediately with whatever session is already known (from
+      // localStorage, no network round trip needed) and again on every future change -
+      // this is more reliable than a one-shot getUser() call, which can race the
+      // browser's session restore right after a fresh page load and wrongly read as "not logged in".
+      CT.onAuthChange(applyAuthState);
+    }
   </script>
 </body>
 </html>

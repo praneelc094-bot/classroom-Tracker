@@ -33,6 +33,19 @@
 <body>
   <a href="index.html" class="back-to-main">◀ Back to Classroom Tracker</a>
   <h2>📚 Lecture History</h2>
+
+  <div id="userBar" class="user-bar" style="display:none">
+    Signed in as <b id="userEmail"></b>
+    <button id="signOutBtn">Sign out</button>
+  </div>
+
+  <div id="loginGate" class="login-gate">
+    <p>Sign in with your Google account to view your lecture history.</p>
+    <button id="googleSignInBtn">🔐 Sign in with Google</button>
+    <p id="authError" class="err"></p>
+  </div>
+
+  <div id="appContent" style="display:none">
   <p class="meta">Everything a previous session taught — transcript, detected topics, and every image that was approved for the projector — kept here so you can come back to it later.</p>
 
   <div id="listView">
@@ -43,6 +56,7 @@
     <button id="back">◀ Back to all lectures</button>
     <div id="detailHead"></div>
     <div id="timeline"></div>
+  </div>
   </div>
 
   <script src="config.js"></script>
@@ -78,6 +92,7 @@
             <div class="row-head">
               <b class="session-name">${s.name}</b>
               <span class="row-actions">
+                <button class="continue-btn" data-id="${s.id}" title="Resume this lecture">▶ Continue</button>
                 <button class="rename-btn" data-id="${s.id}" title="Rename session">✏️ Rename</button>
                 <button class="del-btn" data-id="${s.id}">🗑 Delete</button>
               </span>
@@ -90,7 +105,8 @@
             <div class="sub">${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${s.subject || 'no subject'} · ${wins} windows</div>`;
           div.addEventListener('click', e => {
             const id = Number(e.target.dataset.id);
-            if (e.target.classList.contains('del-btn'))    { deleteLocal(id); }
+            if (e.target.classList.contains('continue-btn')) { location.href = './?resumeLocal=' + id; }
+            else if (e.target.classList.contains('del-btn'))    { deleteLocal(id); }
             else if (e.target.classList.contains('rename-btn')) { startRename(id); }
             else if (e.target.classList.contains('rename-save')) { saveRename(id); }
             else if (e.target.classList.contains('rename-cancel')) { cancelRename(id); }
@@ -128,6 +144,7 @@
               <div class="row-head">
                 <b class="session-name">${l.subject || 'Untitled lecture'}</b>
                 <span class="row-actions">
+                  <button class="continue-btn" data-id="${l.id}" title="Resume this lecture">▶ Continue</button>
                   <button class="rename-btn" data-id="${l.id}" title="Rename session">✏️ Rename</button>
                 </span>
               </div>
@@ -140,7 +157,8 @@
               · ${l.total_windows || 0} windows · ${l.source === 'transcript' ? 'test transcript' : 'live'} · ${l.model || ''}</div>`;
             div.addEventListener('click', e => {
               const id = e.target.dataset.id;
-              if (e.target.classList.contains('rename-btn')) { startRenameCloud(id); }
+              if (e.target.classList.contains('continue-btn')) { location.href = './?resumeCloud=' + id; }
+              else if (e.target.classList.contains('rename-btn')) { startRenameCloud(id); }
               else if (e.target.classList.contains('rename-save')) { saveRenameCloud(id); }
               else if (e.target.classList.contains('rename-cancel')) { cancelRenameCloud(id); }
               else if (!e.target.closest('.rename-form') && !e.target.classList.contains('rename-btn')) { openLecture(l.id); }
@@ -290,7 +308,32 @@
       listView.style.display = 'block';
     };
 
-    renderList();
+    // ---------- Auth gate: signed-in teachers only ----------
+    function applyAuthState(user) {
+      const loggedIn = !!user;
+      document.getElementById('loginGate').style.display = loggedIn ? 'none' : 'block';
+      document.getElementById('appContent').style.display = loggedIn ? 'block' : 'none';
+      document.getElementById('userBar').style.display = loggedIn ? 'block' : 'none';
+      document.getElementById('userEmail').textContent = user?.email || '';
+      if (loggedIn) renderList();
+    }
+
+    document.getElementById('googleSignInBtn').onclick = async () => {
+      document.getElementById('authError').textContent = '';
+      try { await CT.signInWithGoogle(); }
+      catch (err) { document.getElementById('authError').textContent = 'Sign-in failed: ' + err.message; }
+    };
+    document.getElementById('signOutBtn').onclick = () => CT.signOut();
+
+    if (!CT.ready) {
+      document.getElementById('loginGate').innerHTML =
+        '<p class="err">Storage isn\'t configured yet. Open <b>config.js</b> and fill in SUPABASE_URL and SUPABASE_ANON_KEY, then refresh.</p>';
+    } else {
+      // onAuthChange fires immediately with whatever session is already known (from
+      // localStorage, no network round trip), then again on every future change - more
+      // reliable than a one-shot getUser() call right after a fresh page load.
+      CT.onAuthChange(applyAuthState);
+    }
   </script>
 </body>
 </html>

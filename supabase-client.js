@@ -23,12 +23,36 @@ const CT = (() => {
     if (!warnOnce._said) { console.warn('[Classroom Tracker storage] ' + msg); warnOnce._said = true; }
   }
 
+  // ---------- Auth (Google sign-in, per-teacher accounts) ----------
+  async function getUser() {
+    if (!ready) return null;
+    const { data } = await client.auth.getUser();
+    return data?.user || null;
+  }
+
+  function onAuthChange(callback) {
+    if (!ready) return;
+    client.auth.onAuthStateChange((_event, session) => callback(session?.user || null));
+  }
+
+  async function signInWithGoogle() {
+    if (!ready) return;
+    await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href } });
+  }
+
+  async function signOut() {
+    if (!ready) return;
+    await client.auth.signOut();
+  }
+
   // ---------- Lectures ----------
   async function startLecture({ subject, model, source }) {
     if (!ready) { warnOnce('Supabase not configured - lectures will not be saved. Fill SUPABASE_URL / SUPABASE_ANON_KEY in config.js.'); return null; }
+    const user = await getUser();
+    if (!user) { warnOnce('Not signed in - lecture will not be saved.'); return null; }
     const { data, error } = await client
       .from('lectures')
-      .insert({ subject: subject || 'unknown', model: model || null, source: source || 'live' })
+      .insert({ subject: subject || 'unknown', model: model || null, source: source || 'live', lecturer_id: user.id })
       .select('id')
       .single();
     if (error) { console.error('startLecture failed', error); return null; }
@@ -42,6 +66,15 @@ const CT = (() => {
       .update({ ended_at: new Date().toISOString(), total_windows: totalWindows || 0 })
       .eq('id', lectureId);
     if (error) console.error('endLecture failed', error);
+  }
+
+  async function reopenLecture(lectureId) {
+    if (!ready || !lectureId) return;
+    const { error } = await client
+      .from('lectures')
+      .update({ ended_at: null })
+      .eq('id', lectureId);
+    if (error) console.error('reopenLecture failed', error);
   }
 
   async function listLectures() {
@@ -157,5 +190,5 @@ const CT = (() => {
     return { lecture, windows: windows || [], images: images || [] };
   }
 
-  return { ready, startLecture, endLecture, listLectures, renameLecture, saveWindow, saveApprovedImage, getLectureDetail };
+  return { ready, getUser, onAuthChange, signInWithGoogle, signOut, startLecture, endLecture, reopenLecture, listLectures, renameLecture, saveWindow, saveApprovedImage, getLectureDetail };
 })();
