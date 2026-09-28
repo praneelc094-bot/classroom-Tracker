@@ -30,19 +30,33 @@
     .rename-cancel { background: #eee; border: 1px solid #ccc; border-radius: 4px; padding: 4px 10px; font-size: 13px; }
   </style>
 </head>
-<body>
-  <a href="index.html" class="back-to-main">◀ Back to Classroom Tracker</a>
-  <h2>📚 Lecture History</h2>
+<body class="auth-pending">
+  <header class="app-chrome">
+    <a href="index.html" class="back-to-main">◀ Back to Classroom Tracker</a>
+    <h2>📚 Lecture History</h2>
+    <div id="userBar" class="user-bar" style="display:none">
+      Signed in as <b id="userEmail"></b>
+      <button id="signOutBtn">Sign out</button>
+    </div>
+  </header>
 
-  <div id="userBar" class="user-bar" style="display:none">
-    Signed in as <b id="userEmail"></b>
-    <button id="signOutBtn">Sign out</button>
-  </div>
-
-  <div id="loginGate" class="login-gate">
-    <p>Sign in with your Google account to view your lecture history.</p>
-    <button id="googleSignInBtn">🔐 Sign in with Google</button>
-    <p id="authError" class="err"></p>
+  <div id="loginGate" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">🎓</div>
+      <h1>Classroom Tracker</h1>
+      <p class="login-tag">Sign in to see your lecture history</p>
+      <ul class="login-points">
+        <li>📚 Every lecture you recorded, in order</li>
+        <li>▶ Continue any lecture where you left off</li>
+        <li>🖼 Review the images you projected</li>
+      </ul>
+      <button id="googleSignInBtn" class="google-btn">
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.9 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>
+        Sign in with Google
+      </button>
+      <p id="authError" class="err"></p>
+      <p class="login-foot">Your sessions are private to your account.</p>
+    </div>
   </div>
 
   <div id="appContent" style="display:none">
@@ -67,12 +81,6 @@
     const listView = document.getElementById('listView');
     const detailView = document.getElementById('detailView');
 
-    function fmtDuration(startedAt, endedAt) {
-      if (!endedAt) return 'in progress';
-      const s = Math.round((new Date(endedAt) - new Date(startedAt)) / 1000);
-      return `${Math.floor(s / 60)}m ${s % 60}s`;
-    }
-
     function renderList() {
       listEl.innerHTML = '';
 
@@ -87,7 +95,7 @@
           div.className = 'lecture-row';
           div.dataset.id = s.id;
           const d = new Date(s.date);
-          const wins = s.windows?.length || 0;
+          const wins = spokenWindows(s).length;
           div.innerHTML = `
             <div class="row-head">
               <b class="session-name">${s.name}</b>
@@ -122,59 +130,7 @@
         });
       }
 
-      // --- Supabase sessions (if configured) ---
-      if (CT.ready) {
-        const heading2 = document.createElement('h3');
-        heading2.textContent = '☁️ Cloud sessions';
-        listEl.appendChild(heading2);
-        CT.listLectures().then(lectures => {
-          if (!lectures.length) {
-            const p = document.createElement('p');
-            p.className = 'empty';
-            p.textContent = 'No cloud lectures yet.';
-            listEl.appendChild(p);
-            return;
-          }
-          lectures.forEach(l => {
-            const div = document.createElement('div');
-            div.className = 'lecture-row';
-            div.dataset.id = l.id;
-            const d = new Date(l.started_at);
-            div.innerHTML = `
-              <div class="row-head">
-                <b class="session-name">${l.subject || 'Untitled lecture'}</b>
-                <span class="row-actions">
-                  <button class="continue-btn" data-id="${l.id}" title="Resume this lecture">▶ Continue</button>
-                  <button class="rename-btn" data-id="${l.id}" title="Rename session">✏️ Rename</button>
-                </span>
-              </div>
-              <div class="rename-form" id="renamec-${l.id}" style="display:none">
-                <input class="rename-input" data-id="${l.id}" value="${l.subject || ''}" />
-                <button class="rename-save" data-id="${l.id}">✓ Save</button>
-                <button class="rename-cancel" data-id="${l.id}">Cancel</button>
-              </div>
-              <div class="sub">${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${fmtDuration(l.started_at, l.ended_at)}
-              · ${l.total_windows || 0} windows · ${l.source === 'transcript' ? 'test transcript' : 'live'} · ${l.model || ''}</div>`;
-            div.addEventListener('click', e => {
-              const id = e.target.dataset.id;
-              if (e.target.classList.contains('continue-btn')) { location.href = './?resumeCloud=' + id; }
-              else if (e.target.classList.contains('rename-btn')) { startRenameCloud(id); }
-              else if (e.target.classList.contains('rename-save')) { saveRenameCloud(id); }
-              else if (e.target.classList.contains('rename-cancel')) { cancelRenameCloud(id); }
-              else if (!e.target.closest('.rename-form') && !e.target.classList.contains('rename-btn')) { openLecture(l.id); }
-            });
-            div.addEventListener('keydown', e => {
-              if (e.key === 'Enter' && e.target.classList.contains('rename-input')) {
-                e.preventDefault();
-                saveRenameCloud(e.target.dataset.id);
-              }
-            });
-            listEl.appendChild(div);
-          });
-        });
-      }
-
-      if (!local.length && !CT.ready) {
+      if (!local.length) {
         listEl.innerHTML = '<p class="empty">No saved sessions yet. Run a session in the main app and click 💾 Save Session.</p>';
       }
     }
@@ -209,27 +165,6 @@
       if (form) form.style.display = 'none';
     }
 
-    function startRenameCloud(id) {
-      const form = document.getElementById('renamec-' + id);
-      if (form) {
-        form.style.display = 'flex';
-        form.querySelector('.rename-input').focus();
-      }
-    }
-
-    async function saveRenameCloud(id) {
-      const form = document.getElementById('renamec-' + id);
-      const newName = form?.querySelector('.rename-input')?.value.trim();
-      if (!newName) return;
-      await CT.renameLecture(id, newName);
-      renderList();
-    }
-
-    function cancelRenameCloud(id) {
-      const form = document.getElementById('renamec-' + id);
-      if (form) form.style.display = 'none';
-    }
-
     function openLocal(id) {
       const sessions = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
       const s = sessions.find(x => x.id === id);
@@ -238,68 +173,30 @@
       detailView.style.display = 'block';
       document.getElementById('back').style.display = 'inline-block';
       const d = new Date(s.date);
+      const spoken = spokenWindows(s);   // silent windows are left out of history
       document.getElementById('detailHead').innerHTML =
         `<h3>${s.name}</h3>
-         <p class="meta">${s.subject || ''} · ${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${s.windows.length} windows</p>`;
+         <p class="meta">${s.subject || ''} · ${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${spoken.length} windows</p>`;
       const tl = document.getElementById('timeline');
       tl.innerHTML = '';
-      s.windows.forEach(w => {
+      spoken.forEach(w => {
         const div = document.createElement('div');
         div.className = 'tl-item';
         const mm = sec => `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`;
         let html = `<div class="time">${mm(w.startSec)} – ${mm(w.endSec)}</div>`;
         if (w.topic) html += `<div class="tl-topic">${w.onTopic === false ? '💬 ' : '📘 '}${w.topic}</div>`;
         if (w.keywords?.length) html += `<div class="meta">🔑 ${w.keywords.join(', ')}</div>`;
-        html += `<div class="tl-text">${w.text || '<span class="empty">(silence)</span>'}</div>`;
+        html += `<div class="tl-text">${w.text}</div>`;
         if (w.verdict) html += `<div class="meta">judged: ${w.verdict === 'correct' ? '✅ correct' : '❌ wrong – ' + (w.correctTopic || '?')}</div>`;
         if (w.imageShown) html += `<div class="meta">🖼 image shown: ${w.imageShown}</div>`;
         div.innerHTML = html;
         tl.appendChild(div);
       });
-      if (!s.windows.length) tl.innerHTML = '<p class="empty">No windows recorded.</p>';
+      if (!spoken.length) tl.innerHTML = '<p class="empty">Nothing was said in this session.</p>';
     }
 
-    async function openLecture(id) {
-      listView.style.display = 'none';
-      detailView.style.display = 'block';
-      document.getElementById('back').style.display = 'inline-block';
-      document.getElementById('detailHead').innerHTML = '<p class="empty">Loading…</p>';
-      document.getElementById('timeline').innerHTML = '';
-
-      const { lecture, windows, images } = await CT.getLectureDetail(id);
-      const d = new Date(lecture.started_at);
-      document.getElementById('detailHead').innerHTML =
-        `<h3>${lecture.subject || 'Untitled lecture'}</h3>
-         <p class="meta">${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${fmtDuration(lecture.started_at, lecture.ended_at)}
-         · ${windows.length} windows · ${images.length} images approved</p>`;
-
-      // group images by the window they were approved for, so each
-      // transcript window can show the image that was on screen at that moment
-      const imagesByWindow = {};
-      images.forEach(img => {
-        (imagesByWindow[img.window_id] = imagesByWindow[img.window_id] || []).push(img);
-      });
-
-      const tl = document.getElementById('timeline');
-      windows.forEach(w => {
-        const div = document.createElement('div');
-        div.className = 'tl-item';
-        const mm = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-        let html = `<div class="time">${mm(w.start_sec)} – ${mm(w.end_sec)}</div>`;
-        if (w.topic) html += `<div class="tl-topic">${w.on_topic === false ? '💬 ' : '📘 '}${w.topic}</div>`;
-        html += `<div class="tl-text">${w.transcript_text || '<span class="empty">(silence)</span>'}</div>`;
-        if (w.verdict) html += `<div class="meta">judged: ${w.verdict === 'correct' ? '✅ correct' : '❌ wrong – ' + (w.correct_topic || '?')}</div>`;
-
-        const imgs = imagesByWindow[w.id] || [];
-        imgs.forEach(img => {
-          const src = img.public_url || img.source_url;
-          html += `<div class="tl-img"><img src="${src}" alt="${img.title || ''}">
-            <div class="tl-cap">${img.title || ''}${img.artist ? ' – ' + img.artist : ''}${img.license ? ' · ' + img.license : ''}</div></div>`;
-        });
-        div.innerHTML = html;
-        tl.appendChild(div);
-      });
-      if (!windows.length) tl.innerHTML = '<p class="empty">No transcript windows recorded for this lecture.</p>';
+    function spokenWindows(s) {
+      return (s.windows || []).filter(w => w.text && w.text.trim());
     }
 
     document.getElementById('back').onclick = () => {
@@ -311,9 +208,7 @@
     // ---------- Auth gate: signed-in teachers only ----------
     function applyAuthState(user) {
       const loggedIn = !!user;
-      document.getElementById('loginGate').style.display = loggedIn ? 'none' : 'block';
-      document.getElementById('appContent').style.display = loggedIn ? 'block' : 'none';
-      document.getElementById('userBar').style.display = loggedIn ? 'block' : 'none';
+      setAuthView(loggedIn);
       document.getElementById('userEmail').textContent = user?.email || '';
       if (loggedIn) renderList();
     }
@@ -326,8 +221,9 @@
     document.getElementById('signOutBtn').onclick = () => CT.signOut();
 
     if (!CT.ready) {
-      document.getElementById('loginGate').innerHTML =
-        '<p class="err">Storage isn\'t configured yet. Open <b>config.js</b> and fill in SUPABASE_URL and SUPABASE_ANON_KEY, then refresh.</p>';
+      setAuthView(false);
+      document.querySelector('#loginGate .login-card').innerHTML =
+        '<h1>Classroom Tracker</h1><p class="err">Storage isn\'t configured yet. Open <b>config.js</b> and fill in SUPABASE_URL and SUPABASE_ANON_KEY, then refresh.</p>';
     } else {
       // onAuthChange fires immediately with whatever session is already known (from
       // localStorage, no network round trip), then again on every future change - more

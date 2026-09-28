@@ -13,6 +13,16 @@
 //  before - you just won't have a history for that session.
 // ============================================================
 
+// Switch the page between the full-screen sign-in view and the app. Until the first call the
+// body stays "auth-pending" and shows neither, so signed-in teachers never see a sign-in flash.
+function setAuthView(loggedIn) {
+  document.body.classList.remove('auth-pending');
+  document.body.classList.toggle('signed-in', loggedIn);
+  document.body.classList.toggle('signed-out', !loggedIn);
+  document.getElementById('appContent').style.display = loggedIn ? 'block' : 'none';
+  document.getElementById('userBar').style.display = loggedIn ? 'flex' : 'none';
+}
+
 const CT = (() => {
   const url = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '').trim();
   const key = (typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : '').trim();

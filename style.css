@@ -92,8 +92,23 @@ button.picked { outline: 2px solid #333; }
 .lightbox .caption { color: #ddd; font-size: 14px; margin-top: 10px; }
 
 /* Auth gate */
-.login-gate { background: #f0f7ff; border: 1px solid #b8d9f8; border-radius: 8px; padding: 24px; margin-top: 16px; text-align: center; }
-.login-gate button { background: #1a5c9a; color: #fff; border: none; border-radius: 4px; font-weight: bold; padding: 10px 22px; }
-.login-gate button:hover { background: #144878; }
+/* Nothing shows until the sign-in check finishes; then either the app or the sign-in screen */
+body.auth-pending .app-chrome, body.auth-pending .login-screen,
+body.signed-out .app-chrome, body.signed-in .login-screen { display: none !important; }
+
+.login-screen { position: fixed; inset: 0; z-index: 100; display: flex; padding: 16px; overflow-y: auto; box-sizing: border-box;
+  background: linear-gradient(135deg, #1a5c3a 0%, #134a2e 45%, #1a4f7a 100%); }
+.login-card { margin: auto; width: 100%; max-width: 400px; background: #fff; border-radius: 14px; padding: 36px 32px 26px; text-align: center;
+  box-shadow: 0 18px 50px rgba(0,0,0,.28); box-sizing: border-box; }
+.login-logo { font-size: 44px; line-height: 1; }
+.login-card h1 { margin: 10px 0 4px; font-size: 26px; color: #1a5c3a; }
+.login-tag { margin: 0 0 18px; color: #555; font-size: 15px; }
+.login-points { list-style: none; padding: 0; margin: 0 0 24px; text-align: left; display: inline-block; }
+.login-points li { margin: 7px 0; font-size: 14px; color: #333; }
+.google-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: 100%; margin: 0; padding: 11px 16px;
+  background: #fff; color: #3c4043; border: 1px solid #dadce0; border-radius: 6px; font-size: 15px; font-weight: 600; }
+.google-btn:hover { background: #f7f8f8; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.login-foot { margin: 16px 0 0; font-size: 12px; color: #888; }
+.login-card .err:empty { display: none; }
 .user-bar { display: flex; align-items: center; gap: 10px; font-size: 14px; margin-bottom: 8px; }
 .user-bar button { padding: 4px 12px; margin: 0; }
