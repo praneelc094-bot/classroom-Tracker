@@ -21,7 +21,23 @@ function setAuthView(loggedIn) {
   document.body.classList.toggle('signed-out', !loggedIn);
   document.getElementById('appContent').style.display = loggedIn ? 'block' : 'none';
   document.getElementById('userBar').style.display = loggedIn ? 'flex' : 'none';
+  const errEl = document.getElementById('authError');
+  if (errEl && !loggedIn && SIGN_IN_ERROR) errEl.textContent = 'Google sign-in didn’t finish (' + SIGN_IN_ERROR + '). Please try again.';
 }
+
+// A failed Google sign-in comes back as ?error=…#error=… in the address. If that is left there,
+// Supabase reports the old error on every later attempt and ignores the new sign-in, so strip it
+// before the client reads the address. Returns the message only when this load really failed.
+const SIGN_IN_ERROR = (() => {
+  const u = new URL(location.href);
+  const hash = new URLSearchParams(u.hash.slice(1));
+  const msg = u.searchParams.get('error_description') || hash.get('error_description') || u.searchParams.get('error') || hash.get('error');
+  if (!msg) return '';
+  ['error', 'error_code', 'error_description'].forEach(k => { u.searchParams.delete(k); hash.delete(k); });
+  u.hash = hash.toString();
+  history.replaceState(null, '', u.pathname + u.search + u.hash);
+  return hash.has('access_token') ? '' : msg;   // fresh tokens next to a stale error: the sign-in worked
+})();
 
 const CT = (() => {
   const url = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '').trim();
@@ -47,7 +63,18 @@ const CT = (() => {
 
   async function signInWithGoogle() {
     if (!ready) return;
-    await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.href } });
+    // prompt=select_account makes Google show its account chooser every time, instead of
+    // silently reusing whichever Google account the browser is already signed in to
+    await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: signInReturnUrl(), queryParams: { prompt: 'select_account' } } });
+  }
+
+  // Come back to this page, keeping only a pending Continue (?resumeLocal / ?resumeCloud) and
+  // dropping anything else in the address, such as an error left by an earlier attempt
+  function signInReturnUrl() {
+    const back = new URL(location.origin + location.pathname);
+    const now = new URLSearchParams(location.search);
+    ['resumeLocal', 'resumeCloud'].forEach(k => { if (now.get(k)) back.searchParams.set(k, now.get(k)); });
+    return back.toString();
   }
 
   async function signOut() {

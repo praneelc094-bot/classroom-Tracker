@@ -2,27 +2,36 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Classroom Tracker – Phase 1</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Classroom Tracker – Live session</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="auth-pending">
-  <header class="app-chrome">
-    <h2>Classroom Tracker – Live Topic Detection <a href="history.html" style="font-size:14px;">📚 View lecture history</a></h2>
+  <header class="app-chrome appbar">
+    <a class="brand" href="./"><span class="brand-mark">Ct</span><span>Classroom Tracker</span></a>
+    <nav class="tabs">
+      <a class="tab active" href="./">Live session</a>
+      <a class="tab" href="history.html">Lecture history</a>
+    </nav>
+    <div class="spacer"></div>
+    <div id="projStatus" class="proj-pill">Projector not open</div>
     <div id="userBar" class="user-bar" style="display:none">
-      Signed in as <b id="userEmail"></b>
-      <button id="signOutBtn">Sign out</button>
+      <span>Signed in as <b id="userEmail"></b></span>
+      <button id="signOutBtn" class="btn btn-sm">Sign out</button>
     </div>
   </header>
 
   <div id="loginGate" class="login-screen">
     <div class="login-card">
-      <div class="login-logo">🎓</div>
+      <div class="login-logo">Ct</div>
       <h1>Classroom Tracker</h1>
       <p class="login-tag">Live topic detection and projector images for your lectures</p>
       <ul class="login-points">
-        <li>🎙 Live transcript while you teach</li>
-        <li>🖼 Suggested diagrams, shown only after you approve</li>
-        <li>📚 Every lecture saved to your account</li>
+        <li>Live transcript while you teach</li>
+        <li>Suggested diagrams, shown only after you approve</li>
+        <li>Every lecture saved to your account</li>
       </ul>
       <button id="googleSignInBtn" class="google-btn">
         <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.9 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>
@@ -38,97 +47,127 @@
     No API key found. Open <b>config.js</b>, paste your OpenRouter key between the quotes, save, and refresh this page.
   </p>
 
-  <label>Subject / level of the lecture</label>
-  <input id="subject" placeholder="e.g. Semiconductor devices – B.Tech 3rd year">
-
-  <label>Model</label>
-  <select id="model">
-    <option value="anthropic/claude-haiku-4.5">Claude Haiku 4.5</option>
-    <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-    <option value="openai/gpt-4o-mini">GPT-4o mini</option>
-    <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
-  </select>
-
-  <button id="startBtn">Start</button>
-  <button id="stopBtn">Stop</button>
-  <p><span id="status">Idle</span> | Next window in: <span id="countdown">–</span>s</p>
-
-  <div id="display" class="display">
-    <div class="display-head">
-      <span>
-        <span class="pill" id="dispState">Idle</span>
-        <span id="dispTopic" class="disp-topic">Waiting for a lesson topic…</span>
-      </span>
-      <span class="disp-controls">
-        <button id="openProjector" title="Open the projector screen in a new window">🖥 Open projector screen</button>
-        <span id="projStatus" class="meta">projector: not open</span>
-      </span>
+  <section class="session-bar">
+    <label class="field grow">
+      <span class="field-label">Subject / level of the lecture</span>
+      <input id="subject" placeholder="e.g. Semiconductor devices – B.Tech 3rd year">
+    </label>
+    <label class="field model">
+      <span class="field-label">Model</span>
+      <select id="model">
+        <option value="anthropic/claude-haiku-4.5">Claude Haiku 4.5</option>
+        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+        <option value="openai/gpt-4o-mini">GPT-4o mini</option>
+        <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+      </select>
+    </label>
+    <div class="live-status">
+      <span id="micDot" class="mic-dot"></span>
+      <span id="status">Idle</span>
+      <span class="sep"></span>
+      <span class="next">Next window in <b id="countdown">–</b></span>
     </div>
-    <div class="stage-row">
+    <button id="startBtn" class="btn btn-green">Start</button>
+    <button id="stopBtn" class="btn btn-dark"><span class="stop-square"></span>Stop</button>
+    <button id="openProjector" class="btn" title="Open the projector screen in a new window">Open projector screen</button>
+  </section>
+
+  <main class="app-main">
+    <div id="display" class="stage">
       <div class="approver-col">
-        <button id="approveBtn" class="btn-approve" disabled>✅ Show on projector <kbd>A</kbd></button>
-        <button id="rejectBtn" class="btn-reject" disabled>❌ Wrong – next image <kbd>N</kbd></button>
-        <div class="nav-row">
-          <button id="prevImg" disabled>◀</button><span id="imgCount" class="meta"></span><button id="nextImg" disabled>▶</button>
+        <div class="card topic-card">
+          <span class="pill" id="dispState">Idle</span>
+          <div class="small-label">Detected topic</div>
+          <div id="dispTopic" class="topic-serif">Waiting for a lesson topic…</div>
         </div>
-        <button id="skipBtn" disabled>🚫 Skip topic <kbd>S</kbd></button>
-        <hr>
-        <button id="pauseBtn" title="Stop new suggestions while you go on a tangent">⏸ Pause suggestions</button>
-        <button id="clearProjBtn" title="Blank the projector">⬛ Blank projector</button>
-        <p class="meta">On projector now:<br><span id="onProjector">nothing</span></p>
+        <div class="stack">
+          <button id="approveBtn" class="btn-approve" disabled><span>Show on projector</span><kbd>A</kbd></button>
+          <button id="rejectBtn" class="btn-reject" disabled><span>Wrong – next image</span><kbd>N</kbd></button>
+          <div class="nav-row">
+            <button id="prevImg" disabled>◀</button><span id="imgCount"></span><button id="nextImg" disabled>▶</button>
+          </div>
+          <button id="skipBtn" class="btn-skip" disabled><span>Skip topic</span><kbd>S</kbd></button>
+        </div>
+        <div class="divider"></div>
+        <div class="stack">
+          <button id="pauseBtn" class="btn-ghost" title="Stop new suggestions while you go on a tangent">Pause suggestions</button>
+          <button id="clearProjBtn" class="btn-ghost" title="Blank the projector">Blank projector</button>
+        </div>
+        <div class="onair-card">
+          <span class="onair-label">On projector now</span>
+          <div id="onAirThumb" class="onair-thumb">nothing</div>
+          <span id="onProjector" class="onair-title">nothing</span>
+        </div>
       </div>
+
       <div class="stage-col">
-        <div class="display-img">
-          <img id="dispImg" alt="" style="display:none">
-          <p id="dispEmpty" class="meta">Suggested images appear here. Nothing goes to the projector until you approve it.</p>
+        <div class="card preview-card">
+          <div class="display-img">
+            <img id="dispImg" alt="" style="display:none">
+            <p id="dispEmpty">Suggested images appear here. Nothing goes to the projector until you approve it.</p>
+          </div>
+          <p id="dispCaption" class="caption"></p>
         </div>
-        <p id="dispCaption" class="caption"></p>
-        <div class="transcript-box">
-          <h4>Live transcript <span id="micDot" class="mic-dot" title="Microphone status"></span></h4>
+        <div class="card transcript-card">
+          <div class="card-head"><span class="section-label">Live transcript</span><span class="mic-dot"></span></div>
           <div id="transcriptScroll" class="transcript-scroll"><span id="transcript"></span><span id="interim"></span></div>
         </div>
       </div>
-      <div class="windows-col">
-        <div class="windows-box">
-          <h4>Windows (every 15 s) – newest on top</h4>
-          <p class="meta">Mark each ✅ correct or ❌ wrong.</p>
-          <div id="windows"></div>
+
+      <div class="card windows-col">
+        <div class="windows-head">
+          <span class="section-label">Windows · every 15 s</span>
+          <span class="hint">Newest on top. Mark each correct or wrong.</span>
+        </div>
+        <div id="windows"></div>
+      </div>
+    </div>
+
+    <div class="tools">
+      <details id="testBox" class="card testbox" open>
+        <summary><span class="tb-title">Test with a transcript <span>(no microphone needed)</span></span><span class="tb-toggle"></span></summary>
+        <div class="tb-body">
+          <p class="tb-help">Paste a lecture transcript or load a .txt file. Timestamps like <code>0:15</code> are removed automatically.
+            Put <code>## PN junction</code> before each part to mark the expected topic.</p>
+          <div class="file-row">
+            <label class="btn btn-sm">Choose file<input type="file" id="fileInput" accept=".txt,.md,.srt,.vtt" hidden></label>
+            <span id="fileName" class="meta">No file chosen</span>
+          </div>
+          <textarea id="transcriptInput" placeholder="Paste transcript here…"></textarea>
+          <div class="run-row">
+            <label class="field">
+              <span>Words per 15-second window (30 slow · 38 normal · 45 fast)</span>
+              <input id="wordsPerWindow" type="number" value="38" min="10" max="120">
+            </label>
+            <button id="runTranscriptBtn" class="btn btn-purple">Run transcript</button>
+          </div>
+          <span id="runStatus" class="meta"></span>
+        </div>
+      </details>
+
+      <div class="tools-side">
+        <div id="stats" class="card stats-card">
+          <div class="metrics">
+            <div class="metric"><span class="metric-label">Accuracy</span><span id="acc" class="metric-value">–</span><span id="accSub" class="metric-sub">nothing judged yet</span></div>
+            <div class="metric"><span class="metric-label">Windows</span><span class="metric-value"><span id="judged">0</span><small> / <span id="total">0</span></small></span><span class="metric-sub">judged / total</span></div>
+            <div class="metric"><span class="metric-label">Avg latency</span><span id="lat" class="metric-value">–</span><span id="perModel" class="metric-sub"></span></div>
+          </div>
+          <div class="img-line"><b>Images:</b> <span id="imgStats">–</span></div>
+          <div class="btn-row">
+            <button id="exportBtn" class="btn">Export CSV</button>
+            <button id="clearBtn" class="btn btn-danger">Clear windows</button>
+          </div>
+        </div>
+        <div class="card save-card">
+          <input id="sessionName" placeholder="Session name (e.g. Physics – PN Junction – Sept 27)" />
+          <button id="saveBtn" class="btn btn-green">Save session</button>
+          <a href="history.html">View saved sessions</a>
+          <span id="saveStatus"></span>
         </div>
       </div>
     </div>
-  </div>
+  </main>
   <div id="lightbox" class="lightbox" style="display:none"><img id="lightboxImg" alt=""><p id="lightboxCap" class="caption"></p></div>
-
-  <details id="testBox" class="testbox">
-    <summary><b>🧪 Test with a transcript</b> (no microphone needed)</summary>
-    <p class="meta">
-      Paste a lecture transcript or load a .txt file. Timestamps like <code>0:15</code> or <code>00:01:23</code> are removed automatically.
-      Optional: put a line like <code>## PN junction</code> before each part to mark the <i>expected</i> topic – it is shown next to the detected topic to make judging easy, and is never sent to the AI.
-    </p>
-    <input type="file" id="fileInput" accept=".txt,.md,.srt,.vtt">
-    <textarea id="transcriptInput" rows="8" placeholder="Paste transcript here…"></textarea>
-    <label>Words per 15-second window (≈ speaking speed: 30 slow · 38 normal · 45 fast)</label>
-    <input id="wordsPerWindow" type="number" value="38" min="10" max="120">
-    <button id="runTranscriptBtn">▶ Run transcript</button>
-    <span id="runStatus" class="meta"></span>
-  </details>
-
-  <div id="stats" class="stats">
-    <b>Accuracy:</b> <span id="acc">–</span>
-    · judged <span id="judged">0</span> / <span id="total">0</span> windows
-    · avg latency <span id="lat">–</span>
-    <div id="perModel" class="meta"></div>
-    <div class="meta"><b>Images:</b> <span id="imgStats">–</span></div>
-    <button id="exportBtn">⬇ Export CSV</button>
-    <button id="clearBtn">🗑 Clear windows</button>
-  </div>
-
-  <div class="save-bar">
-    <input id="sessionName" placeholder="Session name (e.g. Physics – PN Junction – Sept 27)" />
-    <button id="saveBtn">💾 Save Session</button>
-    <span id="saveStatus" class="meta"></span>
-    <a href="history.html" class="meta save-history-link">📂 View saved sessions</a>
-  </div>
   </div>
 
   <script src="config.js"></script>
@@ -208,24 +247,28 @@ If the window continues the previous topic, keep the same topic label.`;
       if (listening || runningTranscript) return;
       listening = true;
       recognition.start();
-      document.getElementById('status').textContent = 'Listening…';
-      document.getElementById('micDot').classList.add('live');
+      document.getElementById('status').textContent = 'Listening';
+      document.body.classList.add('listening');
 
       // Carry on from the last window (a resumed lecture, or Start pressed again) instead of restarting at 0:00
       const lastEnd = windows.length ? windows[windows.length - 1].endSec || 0 : 0;
       lastCutAt = Date.now();
       sessionStart = lastCutAt - lastEnd * 1000;
       secondsLeft = WINDOW_SECONDS;
-      document.getElementById('countdown').textContent = secondsLeft;
+      showCountdown(secondsLeft);
       if (currentLectureId) CT.reopenLecture(currentLectureId);   // resumed lecture: keep saving into the same one
       else CT.startLecture({ subject: document.getElementById('subject').value.trim(), model: document.getElementById('model').value, source: 'live' })
         .then(id => currentLectureId = id);
       windowTimer = setInterval(cutWindow, WINDOW_SECONDS * 1000);
       countdownTimer = setInterval(() => {
         secondsLeft = secondsLeft <= 1 ? WINDOW_SECONDS : secondsLeft - 1;
-        document.getElementById('countdown').textContent = secondsLeft;
+        showCountdown(secondsLeft);
       }, 1000);
     };
+
+    function showCountdown(s) {
+      document.getElementById('countdown').textContent = s == null ? '–' : String(s).padStart(2, '0') + 's';
+    }
 
     document.getElementById('stopBtn').onclick = () => {
       if (!listening) return;
@@ -235,8 +278,8 @@ If the window continues the previous topic, keep the same topic label.`;
       clearInterval(countdownTimer);
       if (buffer.trim()) cutWindow();   // save the last partial window
       document.getElementById('status').textContent = 'Stopped';
-      document.getElementById('countdown').textContent = '–';
-      document.getElementById('micDot').classList.remove('live');
+      showCountdown(null);
+      document.body.classList.remove('listening');
       showTranscript('', '');
       // The lecture id is kept (cleared only by "Clear windows"), so Start again carries on in the same
       // lecture and the last window's topic - which arrives after this point - can still be saved.
@@ -247,7 +290,7 @@ If the window continues the previous topic, keep the same topic label.`;
     function cutWindow() {
       const now = Date.now();
       const w = {
-        index: windows.length + 1,
+        index: nextWindowIndex(),
         startSec: Math.round((lastCutAt - sessionStart) / 1000),
         endSec: Math.round((now - sessionStart) / 1000),
         text: buffer.trim()
@@ -260,23 +303,44 @@ If the window continues the previous topic, keep the same topic label.`;
       console.log('Window', w);
     }
 
+    // After the highest existing number, not the list length: a resumed cloud lecture has no rows
+    // for its silent windows, so its numbers can have gaps.
+    function nextWindowIndex() {
+      return windows.reduce((m, w) => Math.max(m, w.index || 0), 0) + 1;
+    }
+
     function renderWindow(w) {
       const div = document.createElement('div');
       div.className = 'window' + (w.text ? '' : ' empty');
-      div.innerHTML = `<small>#${w.index} · ${w.startSec}s – ${w.endSec}s · ${w.text.split(/\s+/).filter(Boolean).length} words</small><br>`
-                    + (w.text || '(silence)')
-                    + (w.expected ? `<div class="expected">🎯 expected: ${w.expected}</div>` : '')
-                    + `<div class="topic" id="topic-${w.index}">${w.text ? '⏳ detecting topic…' : ''}</div>`
-                    + `<div class="meta" id="meta-${w.index}"></div>`
-                    + `<div id="thumb-${w.index}"></div>`
+      div.innerHTML = `<span class="win-head">#${w.index} · ${w.startSec}s – ${w.endSec}s · ${w.text.split(/\s+/).filter(Boolean).length} words</span>`
+                    + `<span class="win-text">${w.text || '(silence)'}</span>`
+                    + (w.expected ? `<div class="expected">Expected: ${w.expected}</div>` : '')
+                    + `<div class="win-topic" id="topic-${w.index}">${w.text ? '<span class="pending">Detecting topic…</span>' : ''}</div>`
+                    + `<span class="win-meta" id="meta-${w.index}"></span>`
+                    + `<div class="win-thumb" id="thumb-${w.index}"></div>`
                     + `<div class="judge" id="judge-${w.index}" style="display:none">
-                         <button onclick="judge(${w.index}, true)">✅ Correct</button>
-                         <button onclick="judge(${w.index}, false)">❌ Wrong</button>
-                         <button class="review-btn" onclick="reviewWindow(${w.index})" title="Look through image suggestions for this topic and show one on the projector">🔍 Review</button>
+                         <button class="judge-ok" onclick="judge(${w.index}, true)">Correct</button>
+                         <button class="judge-bad" onclick="judge(${w.index}, false)">Wrong</button>
+                         <button class="review-btn" onclick="reviewWindow(${w.index})" title="Look through image suggestions for this topic and show one on the projector">Review</button>
                          <input id="fix-${w.index}" placeholder="Actual topic (if wrong)" style="display:none"
                                 oninput="fixTopic(${w.index}, this.value)">
                        </div>`;
       document.getElementById('windows').prepend(div);
+    }
+
+    // "Lesson" / "Chit-chat" badge plus the topic, as on the window cards in the design
+    function renderTopic(w) {
+      const el = document.getElementById('topic-' + w.index);
+      el.innerHTML = `<span class="kind${w.onTopic === false ? ' chat' : ''}">${w.onTopic === false ? 'Chit-chat' : 'Lesson'}</span><span></span>`;
+      el.lastChild.textContent = w.topic;
+    }
+
+    function metaLine(w) {
+      const bits = [];
+      if (w.keywords?.length) bits.push('keywords: ' + w.keywords.join(', '));
+      if (w.confidence != null) bits.push('confidence ' + w.confidence);
+      if (w.latencyMs != null) bits.push(w.latencyMs + ' ms');
+      return bits.join(' · ');
     }
 
     // ---------- Topic extraction via OpenRouter (Step 3) ----------
@@ -286,7 +350,7 @@ If the window continues the previous topic, keep the same topic label.`;
       if (!w.text) { w.topic = null; return; }           // skip silent windows
       if (!API_KEY) { topicEl.innerHTML = '<span class="err">No API key – add it in config.js</span>'; return; }
 
-      const prev = windows[w.index - 2];                  // the window before this one
+      const prev = windows[windows.indexOf(w) - 1];       // the window before this one
       const subject = document.getElementById('subject').value.trim() || 'unknown';
       const model = document.getElementById('model').value;
 
@@ -330,9 +394,9 @@ CURRENT window text: ${w.text}`;
         w.imageQuery = result.image_query || '';
         w.latencyMs  = Math.round(performance.now() - t0);
 
-        topicEl.textContent = (w.onTopic ? '📘 ' : '💬 ') + w.topic;
-        metaEl.textContent  = `${model} · keywords: ${w.keywords.join(', ')} · confidence ${w.confidence} · ${w.latencyMs} ms`;
-        document.getElementById('judge-' + w.index).style.display = 'block';
+        renderTopic(w);
+        metaEl.textContent = metaLine(w);
+        document.getElementById('judge-' + w.index).style.display = 'flex';
         updateStats();
         updateDisplay(w);
         if (currentLectureId) CT.saveWindow(currentLectureId, w);
@@ -345,7 +409,8 @@ CURRENT window text: ${w.text}`;
 
     // ---------- Evaluation log (Step 4) ----------
     function judge(index, correct) {
-      const w = windows[index - 1];
+      const w = windows.find(x => x.index === index);   // by number: a resumed lecture can have gaps
+      if (!w) return;
       w.verdict = correct ? 'correct' : 'wrong';
       const box = document.getElementById('judge-' + index);
       const [okBtn, badBtn] = box.querySelectorAll('button');
@@ -360,10 +425,12 @@ CURRENT window text: ${w.text}`;
 
     let fixTopicTimer = null;
     function fixTopic(index, value) {
-      windows[index - 1].correctTopic = value;
+      const w = windows.find(x => x.index === index);
+      if (!w) return;
+      w.correctTopic = value;
       clearTimeout(fixTopicTimer);   // debounce so we don't save on every keystroke
       fixTopicTimer = setTimeout(() => {
-        if (currentLectureId) CT.saveWindow(currentLectureId, windows[index - 1]);
+        if (currentLectureId) CT.saveWindow(currentLectureId, w);
       }, 600);
     }
 
@@ -378,11 +445,15 @@ CURRENT window text: ${w.text}`;
       const accEl = document.getElementById('acc');
       if (judged.length) {
         const pct = Math.round(100 * correct / judged.length);
-        accEl.textContent = `${pct}% (${correct}/${judged.length})`;
-        accEl.className = pct >= 80 ? 'good' : 'bad';
-      } else { accEl.textContent = '–'; accEl.className = ''; }
-      document.getElementById('lat').textContent =
-        lats.length ? Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) + ' ms' : '–';
+        accEl.textContent = pct + '%';
+        accEl.className = 'metric-value ' + (pct >= 80 ? 'good' : 'bad');
+        document.getElementById('accSub').textContent = `${correct} of ${judged.length} judged`;
+      } else {
+        accEl.textContent = '–'; accEl.className = 'metric-value';
+        document.getElementById('accSub').textContent = 'nothing judged yet';
+      }
+      document.getElementById('lat').innerHTML =
+        lats.length ? Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) + '<small> ms</small>' : '–';
 
       // image approvals (Phase 2 metric)
       const decided = windows.filter(w => ['approved', 'skipped'].includes(w.imageVerdict));
@@ -586,14 +657,14 @@ CURRENT window text: ${w.text}`;
       pill.className = 'pill pill-' + (display.paused ? 'paused' : display.state);
 
       document.getElementById('dispTopic').textContent = display.topic || 'Waiting for a lesson topic…';
-      document.getElementById('imgCount').textContent = display.images.length ? ` ${display.i + 1}/${display.images.length} ` : '';
+      document.getElementById('imgCount').textContent = display.images.length ? `${Math.min(display.i + 1, display.images.length)} / ${display.images.length}` : '';
       ['approveBtn', 'rejectBtn', 'prevImg', 'nextImg', 'skipBtn'].forEach(id => document.getElementById(id).disabled = !reviewing);
 
       if (cur && display.state !== 'skipped') {
         img.src = cur.src; img.style.display = 'block'; empty.style.display = 'none';
         document.getElementById('dispCaption').innerHTML =
-          `${cur.title}${cur.artist ? ' – ' + cur.artist : ''}${cur.license ? ' · ' + cur.license : ''}` +
-          ` · <a href="${cur.page}" target="_blank" rel="noopener">Wikimedia Commons</a>`;
+          `<span>${cur.title}${cur.artist ? ' – ' + cur.artist : ''}${cur.license ? ' · ' + cur.license : ''}</span>` +
+          (cur.page ? `<a href="${cur.page}" target="_blank" rel="noopener">Wikimedia Commons</a>` : '');
       } else {
         img.style.display = 'none'; img.removeAttribute('src'); empty.style.display = 'block';
         document.getElementById('dispCaption').textContent = '';
@@ -605,6 +676,12 @@ CURRENT window text: ${w.text}`;
                                           'Suggested images appear here. Nothing goes to the projector until you approve it.';
       }
       document.getElementById('onProjector').textContent = projectorNow ? `${projectorNow.topic} – ${projectorNow.image.title}` : 'nothing';
+      const onAir = document.getElementById('onAirThumb');
+      if (projectorNow?.image?.src) {
+        if (!onAir.firstElementChild || onAir.firstElementChild.src !== projectorNow.image.src) onAir.innerHTML = `<img src="${projectorNow.image.src}" alt="">`;
+      } else {
+        onAir.textContent = 'nothing';
+      }
       syncOnAir();
     }
 
@@ -615,7 +692,7 @@ CURRENT window text: ${w.text}`;
       if (!thumb) return;
       if (w.image?.src) {
         thumb.innerHTML = `<img class="thumb" data-w="${w.index}" src="${w.image.src}" alt="" title="Click to review full size"> <span class="meta">${note}</span>
-          <button class="show-again" data-w="${w.index}">🖥 Show again</button>`;
+          <button class="show-again" data-w="${w.index}">Show again</button>`;
         syncOnAir();
       } else {
         thumb.innerHTML = note ? `<span class="meta">${note}</span>` : '';
@@ -627,7 +704,7 @@ CURRENT window text: ${w.text}`;
       document.querySelectorAll('#windows .show-again').forEach(b => {
         const w = windows.find(x => x.index === Number(b.dataset.w));
         const on = !!w?.image && projectorNow?.image?.src === w.image.src;
-        b.textContent = on ? '🖥 On projector' : '🖥 Show again';
+        b.textContent = on ? 'On projector' : 'Show again';
         b.classList.toggle('on-air', on);
       });
     }
@@ -679,7 +756,7 @@ CURRENT window text: ${w.text}`;
         display.win.imageShown = cur.title;
         display.win.image = cur;
         if (firstTime) display.win.imageTries = display.i + 1;
-        renderThumb(display.win, firstTime ? `🖥 shown after ${display.i + 1} tr${display.i ? 'ies' : 'y'}: ${cur.title}` : `🖥 shown again: ${cur.title}`);
+        renderThumb(display.win, firstTime ? `Shown after ${display.i + 1} tr${display.i ? 'ies' : 'y'}: ${cur.title}` : `Shown again: ${cur.title}`);
         if (currentLectureId) {
           CT.saveWindow(currentLectureId, display.win)
             .then(() => CT.saveApprovedImage(currentLectureId, display.win, cur));
@@ -700,7 +777,7 @@ CURRENT window text: ${w.text}`;
       if (display.win && !display.win.image) {   // keep the record of an image that was already shown
         display.win.imageVerdict = 'skipped';
         const thumb = document.getElementById('thumb-' + display.win.index);
-        if (thumb) thumb.innerHTML = `<span class="meta">🚫 image skipped</span>`;
+        if (thumb) thumb.innerHTML = `<span class="meta">Image skipped</span>`;
         if (currentLectureId) CT.saveWindow(currentLectureId, display.win);
       }
       renderDisplay(); updateStats();
@@ -714,7 +791,7 @@ CURRENT window text: ${w.text}`;
     document.getElementById('pauseBtn').onclick = (e) => {
       display.paused = !display.paused;
       e.target.classList.toggle('picked', display.paused);
-      e.target.textContent = display.paused ? '▶ Resume suggestions' : '⏸ Pause suggestions';
+      e.target.textContent = display.paused ? 'Resume suggestions' : 'Pause suggestions';
       renderDisplay();
     };
     document.getElementById('clearProjBtn').onclick = () => {
@@ -735,8 +812,8 @@ CURRENT window text: ${w.text}`;
     setInterval(() => {
       const on = Date.now() - lastProjectorPing < 6000;
       const el = document.getElementById('projStatus');
-      el.textContent = on ? 'projector: connected ✔' : 'projector: not open';
-      el.className = on ? 'meta good' : 'meta';
+      el.textContent = on ? 'Projector connected' : 'Projector not open';
+      el.classList.toggle('on', on);
     }, 2000);
 
     // Keyboard shortcuts (not while typing in a box)
@@ -755,6 +832,7 @@ CURRENT window text: ${w.text}`;
 
     document.getElementById('fileInput').onchange = async (e) => {
       const f = e.target.files[0];
+      document.getElementById('fileName').textContent = f ? f.name : 'No file chosen';
       if (f) document.getElementById('transcriptInput').value = await f.text();
     };
 
@@ -796,7 +874,7 @@ CURRENT window text: ${w.text}`;
         document.getElementById('runStatus').textContent = `Window ${i + 1} of ${chunks.length}…`;
         const c = chunks[i];
         const w = {
-          index: windows.length + 1,
+          index: nextWindowIndex(),
           startSec: offset + i * WINDOW_SECONDS,
           endSec: offset + (i + 1) * WINDOW_SECONDS,
           text: c.map(t => t.word).join(' '),
@@ -809,7 +887,7 @@ CURRENT window text: ${w.text}`;
       }
 
       document.getElementById('runStatus').textContent =
-        `Done – ${chunks.length} windows. Now mark each one ✅ or ❌ and export the CSV.`;
+        `Done – ${chunks.length} windows. Now mark each one correct or wrong and export the CSV.`;
       btn.disabled = false;
       runningTranscript = false;
       if (currentLectureId) await CT.endLecture(currentLectureId, windows.length);
@@ -821,18 +899,13 @@ CURRENT window text: ${w.text}`;
     // the same as one still in progress.
     function restoreWindow(w) {
       renderWindow(w);
-      const topicEl = document.getElementById('topic-' + w.index);
-      const metaEl = document.getElementById('meta-' + w.index);
       if (w.topic) {
-        topicEl.textContent = (w.onTopic ? '📘 ' : '💬 ') + w.topic;
-        const bits = [];
-        if (w.model) bits.push(w.model);
-        if (w.keywords?.length) bits.push('keywords: ' + w.keywords.join(', '));
-        if (w.confidence != null) bits.push('confidence ' + w.confidence);
-        if (w.latencyMs != null) bits.push(w.latencyMs + ' ms');
-        metaEl.textContent = bits.join(' · ');
+        renderTopic(w);
+        document.getElementById('meta-' + w.index).textContent = metaLine(w);
+        document.getElementById('judge-' + w.index).style.display = 'flex';   // Correct / Wrong / Review
+      } else {
+        document.getElementById('topic-' + w.index).innerHTML = '';
       }
-      if (w.topic) document.getElementById('judge-' + w.index).style.display = 'block';   // Correct / Wrong / Review
       if (w.verdict) {
         const judgeDiv = document.getElementById('judge-' + w.index);
         const [okBtn, badBtn] = judgeDiv.querySelectorAll('button');
@@ -846,9 +919,9 @@ CURRENT window text: ${w.text}`;
       }
       const thumb = document.getElementById('thumb-' + w.index);
       if (thumb && w.imageVerdict === 'approved') {
-        renderThumb(w, w.imageShown ? `🖥 previously shown: ${w.imageShown}` : '');
+        renderThumb(w, w.imageShown ? `Previously shown: ${w.imageShown}` : '');
       } else if (thumb && w.imageVerdict === 'skipped') {
-        thumb.innerHTML = `<span class="meta">🚫 image skipped</span>`;
+        thumb.innerHTML = `<span class="meta">Image skipped</span>`;
       }
     }
 
@@ -942,7 +1015,7 @@ CURRENT window text: ${w.text}`;
     if (!CT.ready) {
       setAuthView(false);
       document.querySelector('#loginGate .login-card').innerHTML =
-        '<h1>Classroom Tracker</h1><p class="err">Storage isn\'t configured yet. Open <b>config.js</b> and fill in SUPABASE_URL and SUPABASE_ANON_KEY, then refresh.</p>';
+        '<div class="login-logo">Ct</div><h1>Classroom Tracker</h1><p class="err">Storage isn\'t configured yet. Open <b>config.js</b> and fill in SUPABASE_URL and SUPABASE_ANON_KEY, then refresh.</p>';
     } else {
       // onAuthChange fires immediately with whatever session is already known (from
       // localStorage, no network round trip needed) and again on every future change -
