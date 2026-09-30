@@ -44,7 +44,7 @@
 
   <div id="appContent" style="display:none">
   <p id="keyWarning" class="warn" style="display:none">
-    No API key found. Open <b>config.js</b>, paste your OpenRouter key between the quotes, save, and refresh this page.
+    Topic detection isn’t set up on the server yet. Deploy the <b>detect-topic</b> Supabase function with your OpenRouter key stored as a secret (see <code>supabase/functions/detect-topic/index.ts</code>), then refresh.
   </p>
 
   <section class="session-bar">
@@ -176,27 +176,13 @@
   <script>
     // ---------- Settings ----------
     const WINDOW_SECONDS = 15;
-    const API_KEY = (typeof OPENROUTER_API_KEY !== 'undefined' ? OPENROUTER_API_KEY : '').trim();
-    if (!API_KEY) document.getElementById('keyWarning').style.display = 'block';
-
-    const SYSTEM_PROMPT = `You label what a teacher is currently teaching, from a short live speech transcript.
-The transcript comes from speech recognition, so expect misheard words, filler, and half sentences.
-Reply with ONLY a JSON object, no other text:
-{
-  "topic": "short topic label, max 8 words",
-  "keywords": ["3 to 5 key terms a student would search for"],
-  "confidence": 0.0 to 1.0,
-  "on_topic": true if this is lesson content, false if it is admin, jokes, discipline or chit-chat,
-  "image_query": "3 to 6 word search query to find a clear teaching diagram of this topic on Wikimedia Commons, e.g. 'p-n junction depletion region diagram'"
-}
-If the window continues the previous topic, keep the same topic label.`;
 
     // ---------- Speech recognition (Step 1) ----------
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      document.getElementById('status').textContent = 'Speech recognition not supported – please use Google Chrome.';
-    }
-    const recognition = new SpeechRecognition();
+    const NO_SPEECH_MSG = 'Speech recognition isn’t available in this browser – use Chrome or Edge (the transcript test still works)';
+    if (!SpeechRecognition) document.getElementById('status').textContent = NO_SPEECH_MSG;
+    // A stand-in when the browser has no speech recognition (e.g. Firefox), so the rest of the page still loads
+    const recognition = SpeechRecognition ? new SpeechRecognition() : { start() {}, stop() {} };
     recognition.lang = 'en-IN';          // Indian English
     recognition.continuous = true;       // keep listening
     recognition.interimResults = true;   // show words before the sentence ends
@@ -209,8 +195,16 @@ If the window continues the previous topic, keep the same topic label.`;
     let secondsLeft = WINDOW_SECONDS;
     let sessionStart = null;
     let lastCutAt = null;
-    let currentLectureId = null;   // Supabase lectures.id for the session in progress
-    let currentLocalSessionId = null;   // localStorage session id, when continuing a locally-saved session
+    let currentLocalSessionId = null;   // saved-session id, when continuing a saved session
+    let unsaved = false;                // windows changed since the last Save session
+
+    // Warn before leaving (tab switch, refresh, close) when there is work that hasn't been saved
+    function markUnsaved() { unsaved = true; }
+    window.addEventListener('beforeunload', (e) => {
+      if (!unsaved && !listening) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
 
     // Live transcript: finished sentences in black, the words still being recognised in grey italics,
     // always scrolled to the newest text.
@@ -238,13 +232,26 @@ If the window continues the previous topic, keep the same topic label.`;
 
     // Chrome stops listening after silence, so restart it automatically
     recognition.onend = () => { if (listening) recognition.start(); };
+    // Errors that retrying can't fix stop the session; otherwise the auto-restart above would
+    // hammer the microphone in a loop while the status still showed "Listening"
+    const FATAL_MIC_ERRORS = {
+      'not-allowed': 'Microphone blocked – allow it with the icon in the address bar, then press Start',
+      'service-not-allowed': 'Microphone blocked – allow it with the icon in the address bar, then press Start',
+      'audio-capture': 'No microphone found – plug one in, then press Start',
+    };
     recognition.onerror = (e) => {
-      if (e.error === 'no-speech') return;   // normal during pauses
+      if (e.error === 'no-speech' || e.error === 'aborted') return;   // normal during pauses / on Stop
+      if (FATAL_MIC_ERRORS[e.error]) {
+        if (listening) document.getElementById('stopBtn').click();
+        document.getElementById('status').textContent = FATAL_MIC_ERRORS[e.error];
+        return;
+      }
       document.getElementById('status').textContent = 'Error: ' + e.error;
     };
 
     document.getElementById('startBtn').onclick = () => {
       if (listening || runningTranscript) return;
+      if (!SpeechRecognition) { alertBox(NO_SPEECH_MSG); return; }
       listening = true;
       recognition.start();
       document.getElementById('status').textContent = 'Listening';
@@ -256,9 +263,6 @@ If the window continues the previous topic, keep the same topic label.`;
       sessionStart = lastCutAt - lastEnd * 1000;
       secondsLeft = WINDOW_SECONDS;
       showCountdown(secondsLeft);
-      if (currentLectureId) CT.reopenLecture(currentLectureId);   // resumed lecture: keep saving into the same one
-      else CT.startLecture({ subject: document.getElementById('subject').value.trim(), model: document.getElementById('model').value, source: 'live' })
-        .then(id => currentLectureId = id);
       windowTimer = setInterval(cutWindow, WINDOW_SECONDS * 1000);
       countdownTimer = setInterval(() => {
         secondsLeft = secondsLeft <= 1 ? WINDOW_SECONDS : secondsLeft - 1;
@@ -281,9 +285,6 @@ If the window continues the previous topic, keep the same topic label.`;
       showCountdown(null);
       document.body.classList.remove('listening');
       showTranscript('', '');
-      // The lecture id is kept (cleared only by "Clear windows"), so Start again carries on in the same
-      // lecture and the last window's topic - which arrives after this point - can still be saved.
-      if (currentLectureId) CT.endLecture(currentLectureId, windows.length);
     };
 
     // ---------- 15-second windows (Step 2) ----------
@@ -297,14 +298,15 @@ If the window continues the previous topic, keep the same topic label.`;
       };
       lastCutAt = now;
       windows.push(w);
+      markUnsaved();
       buffer = '';
       renderWindow(w);
       detectTopic(w);
       console.log('Window', w);
     }
 
-    // After the highest existing number, not the list length: a resumed cloud lecture has no rows
-    // for its silent windows, so its numbers can have gaps.
+    // After the highest existing number, not the list length, so numbers never repeat even if a
+    // saved session has gaps.
     function nextWindowIndex() {
       return windows.reduce((m, w) => Math.max(m, w.index || 0), 0) + 1;
     }
@@ -313,8 +315,8 @@ If the window continues the previous topic, keep the same topic label.`;
       const div = document.createElement('div');
       div.className = 'window' + (w.text ? '' : ' empty');
       div.innerHTML = `<span class="win-head">#${w.index} · ${w.startSec}s – ${w.endSec}s · ${w.text.split(/\s+/).filter(Boolean).length} words</span>`
-                    + `<span class="win-text">${w.text || '(silence)'}</span>`
-                    + (w.expected ? `<div class="expected">Expected: ${w.expected}</div>` : '')
+                    + `<span class="win-text">${w.text ? escapeHtml(w.text) : '(silence)'}</span>`
+                    + (w.expected ? `<div class="expected">Expected: ${escapeHtml(w.expected)}</div>` : '')
                     + `<div class="win-topic" id="topic-${w.index}">${w.text ? '<span class="pending">Detecting topic…</span>' : ''}</div>`
                     + `<span class="win-meta" id="meta-${w.index}"></span>`
                     + `<div class="win-thumb" id="thumb-${w.index}"></div>`
@@ -343,45 +345,27 @@ If the window continues the previous topic, keep the same topic label.`;
       return bits.join(' · ');
     }
 
-    // ---------- Topic extraction via OpenRouter (Step 3) ----------
+    // ---------- Topic extraction (Step 3) ----------
+    let detectionNotSetUp = false;   // the detect-topic function hasn't been deployed yet
+    // Runs on the server (the detect-topic Supabase function), which holds the OpenRouter key
     async function detectTopic(w) {
       const topicEl = document.getElementById('topic-' + w.index);
       const metaEl  = document.getElementById('meta-' + w.index);
       if (!w.text) { w.topic = null; return; }           // skip silent windows
-      if (!API_KEY) { topicEl.innerHTML = '<span class="err">No API key – add it in config.js</span>'; return; }
 
       const prev = windows[windows.indexOf(w) - 1];       // the window before this one
-      const subject = document.getElementById('subject').value.trim() || 'unknown';
       const model = document.getElementById('model').value;
-
-      const userMsg =
-`Subject: ${subject}
-Previous topic: ${prev?.topic || '(none)'}
-Previous window text: ${prev?.text || '(none)'}
-CURRENT window text: ${w.text}`;
 
       const t0 = performance.now();
       try {
-        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + API_KEY,
-            'HTTP-Referer': location.origin,
-            'X-Title': 'Classroom Tracker'
-          },
-          body: JSON.stringify({
-            model: model,
-            max_tokens: 200,
-            temperature: 0.2,
-            messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
-              { role: 'user',   content: userMsg }
-            ]
-          })
+        const data = await CT.detectTopic({
+          model,
+          subject: document.getElementById('subject').value.trim(),
+          prevTopic: prev?.topic || '',
+          prevText: prev?.text || '',
+          text: w.text
         });
-        const data = await res.json();
-        if (!res.ok || data.error) throw new Error(data.error?.message || 'HTTP ' + res.status);
+        if (data?.error) throw new Error(data.error.message || data.error);
 
         const raw = data.choices[0].message.content;
         const result = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -399,10 +383,11 @@ CURRENT window text: ${w.text}`;
         document.getElementById('judge-' + w.index).style.display = 'flex';
         updateStats();
         updateDisplay(w);
-        if (currentLectureId) CT.saveWindow(currentLectureId, w);
+        markUnsaved();
         console.log('Topic', w);
       } catch (err) {
-        topicEl.innerHTML = `<span class="err">Error: ${err.message}</span>`;
+        topicEl.innerHTML = `<span class="err">Error: ${escapeHtml(err.message)}</span>`;
+        if (err.notDeployed) { detectionNotSetUp = true; document.getElementById('keyWarning').style.display = 'block'; }
         console.error(err);
       }
     }
@@ -420,18 +405,14 @@ CURRENT window text: ${w.text}`;
       fix.style.display = correct ? 'none' : 'block';
       if (!correct) fix.focus();
       updateStats();
-      if (currentLectureId) CT.saveWindow(currentLectureId, w);
+      markUnsaved();
     }
 
-    let fixTopicTimer = null;
     function fixTopic(index, value) {
       const w = windows.find(x => x.index === index);
       if (!w) return;
       w.correctTopic = value;
-      clearTimeout(fixTopicTimer);   // debounce so we don't save on every keystroke
-      fixTopicTimer = setTimeout(() => {
-        if (currentLectureId) CT.saveWindow(currentLectureId, w);
-      }, 600);
+      markUnsaved();
     }
 
     function updateStats() {
@@ -497,8 +478,9 @@ CURRENT window text: ${w.text}`;
 
     document.getElementById('clearBtn').onclick = () => {
       if (listening) { alertBox('Stop listening before clearing.'); return; }
+      if (unsaved && windows.length && !confirm('Clear all windows? They haven’t been saved, so they will be lost.')) return;
       windows = []; buffer = '';
-      currentLectureId = null; currentLocalSessionId = null;
+      currentLocalSessionId = null; unsaved = false;
       document.getElementById('windows').innerHTML = '';
       document.getElementById('transcript').textContent = '';
       showTranscript('', '');
@@ -528,11 +510,13 @@ CURRENT window text: ${w.text}`;
           imageQuery: w.imageQuery, imageVerdict: w.imageVerdict, imageShown: w.imageShown, image: w.image
         }))
       };
-      const existing = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
+      const existing = CT.loadSessions();
       const idx = existing.findIndex(s => s.id === record.id);
       if (idx >= 0) existing[idx] = record; else existing.push(record);
       currentLocalSessionId = record.id;
-      localStorage.setItem('classroomSessions', JSON.stringify(existing));
+      try { CT.storeSessions(existing); }
+      catch { document.getElementById('saveStatus').textContent = 'Couldn’t save – browser storage is full. Delete old sessions in Lecture history.'; return; }
+      unsaved = false;
       document.getElementById('saveStatus').textContent = `✓ Saved "${name}"!`;
       setTimeout(() => document.getElementById('saveStatus').textContent = '', 3000);
     };
@@ -563,7 +547,9 @@ CURRENT window text: ${w.text}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Wikimedia HTTP ' + res.status);
       const data = await res.json();
-      const strip = s => (s || '').replace(/<[^>]+>/g, '').trim();
+      // Artist/licence come as HTML (links, &amp; etc.): parse it and keep only the plain text.
+      // DOMParser documents are inert, so nothing in them runs or loads.
+      const strip = s => (new DOMParser().parseFromString(s || '', 'text/html').body.textContent || '').trim();
       const images = Object.values(data.query?.pages || {})
         .sort((a, b) => a.index - b.index)                       // keep search ranking
         .map(p => {
@@ -663,8 +649,8 @@ CURRENT window text: ${w.text}`;
       if (cur && display.state !== 'skipped') {
         img.src = cur.src; img.style.display = 'block'; empty.style.display = 'none';
         document.getElementById('dispCaption').innerHTML =
-          `<span>${cur.title}${cur.artist ? ' – ' + cur.artist : ''}${cur.license ? ' · ' + cur.license : ''}</span>` +
-          (cur.page ? `<a href="${cur.page}" target="_blank" rel="noopener">Wikimedia Commons</a>` : '');
+          `<span>${escapeHtml(cur.title)}${cur.artist ? ' – ' + escapeHtml(cur.artist) : ''}${cur.license ? ' · ' + escapeHtml(cur.license) : ''}</span>` +
+          (/^https:\/\//.test(cur.page || '') ? `<a href="${escapeHtml(cur.page)}" target="_blank" rel="noopener">Wikimedia Commons</a>` : '');
       } else {
         img.style.display = 'none'; img.removeAttribute('src'); empty.style.display = 'block';
         document.getElementById('dispCaption').textContent = '';
@@ -678,7 +664,7 @@ CURRENT window text: ${w.text}`;
       document.getElementById('onProjector').textContent = projectorNow ? `${projectorNow.topic} – ${projectorNow.image.title}` : 'nothing';
       const onAir = document.getElementById('onAirThumb');
       if (projectorNow?.image?.src) {
-        if (!onAir.firstElementChild || onAir.firstElementChild.src !== projectorNow.image.src) onAir.innerHTML = `<img src="${projectorNow.image.src}" alt="">`;
+        if (!onAir.firstElementChild || onAir.firstElementChild.src !== projectorNow.image.src) onAir.innerHTML = `<img src="${escapeHtml(projectorNow.image.src)}" alt="">`;
       } else {
         onAir.textContent = 'nothing';
       }
@@ -691,11 +677,11 @@ CURRENT window text: ${w.text}`;
       const thumb = document.getElementById('thumb-' + w.index);
       if (!thumb) return;
       if (w.image?.src) {
-        thumb.innerHTML = `<img class="thumb" data-w="${w.index}" src="${w.image.src}" alt="" title="Click to review full size"> <span class="meta">${note}</span>
+        thumb.innerHTML = `<img class="thumb" data-w="${w.index}" src="${escapeHtml(w.image.src)}" alt="" title="Click to review full size"> <span class="meta">${escapeHtml(note)}</span>
           <button class="show-again" data-w="${w.index}">Show again</button>`;
         syncOnAir();
       } else {
-        thumb.innerHTML = note ? `<span class="meta">${note}</span>` : '';
+        thumb.innerHTML = note ? `<span class="meta">${escapeHtml(note)}</span>` : '';
       }
     }
 
@@ -757,10 +743,7 @@ CURRENT window text: ${w.text}`;
         display.win.image = cur;
         if (firstTime) display.win.imageTries = display.i + 1;
         renderThumb(display.win, firstTime ? `Shown after ${display.i + 1} tr${display.i ? 'ies' : 'y'}: ${cur.title}` : `Shown again: ${cur.title}`);
-        if (currentLectureId) {
-          CT.saveWindow(currentLectureId, display.win)
-            .then(() => CT.saveApprovedImage(currentLectureId, display.win, cur));
-        }
+        markUnsaved();
       }
       renderDisplay(); updateStats();
     }
@@ -778,7 +761,7 @@ CURRENT window text: ${w.text}`;
         display.win.imageVerdict = 'skipped';
         const thumb = document.getElementById('thumb-' + display.win.index);
         if (thumb) thumb.innerHTML = `<span class="meta">Image skipped</span>`;
-        if (currentLectureId) CT.saveWindow(currentLectureId, display.win);
+        markUnsaved();
       }
       renderDisplay(); updateStats();
     }
@@ -854,7 +837,6 @@ CURRENT window text: ${w.text}`;
 
     document.getElementById('runTranscriptBtn').onclick = async () => {
       if (listening || runningTranscript) { alertBox('Stop the microphone first.'); return; }
-      if (!API_KEY) { document.getElementById('keyWarning').style.display = 'block'; return; }
       const tokens = parseTranscript(document.getElementById('transcriptInput').value);
       if (!tokens.length) { document.getElementById('runStatus').textContent = 'Paste a transcript first.'; return; }
 
@@ -866,9 +848,6 @@ CURRENT window text: ${w.text}`;
       const btn = document.getElementById('runTranscriptBtn');
       btn.disabled = true;
       const offset = windows.length ? windows[windows.length - 1].endSec : 0;
-      if (!currentLectureId) {
-        currentLectureId = await CT.startLecture({ subject: document.getElementById('subject').value.trim(), model: document.getElementById('model').value, source: 'transcript' });
-      }
 
       for (let i = 0; i < chunks.length; i++) {
         document.getElementById('runStatus').textContent = `Window ${i + 1} of ${chunks.length}…`;
@@ -882,15 +861,17 @@ CURRENT window text: ${w.text}`;
           source: 'transcript'
         };
         windows.push(w);
+        markUnsaved();
         renderWindow(w);
         await detectTopic(w);          // one at a time, so each window sees the previous topic
+        if (detectionNotSetUp) break;   // don't retry every remaining window
       }
 
-      document.getElementById('runStatus').textContent =
-        `Done – ${chunks.length} windows. Now mark each one correct or wrong and export the CSV.`;
+      document.getElementById('runStatus').textContent = detectionNotSetUp
+        ? 'Stopped – topic detection isn’t set up yet (see the yellow note above).'
+        : `Done – ${chunks.length} windows. Now mark each one correct or wrong and export the CSV.`;
       btn.disabled = false;
       runningTranscript = false;
-      if (currentLectureId) await CT.endLecture(currentLectureId, windows.length);
     };
 
     // ---------- Continue a previous lecture (from history.html) ----------
@@ -925,7 +906,7 @@ CURRENT window text: ${w.text}`;
       }
     }
 
-    function resumeSession({ subject, model, sessionName, windowsData, lectureId, localId, lastApprovedImage }) {
+    function resumeSession({ subject, model, sessionName, windowsData, localId }) {
       document.getElementById('subject').value = subject || '';
       if (model) document.getElementById('model').value = model;
       if (sessionName) document.getElementById('sessionName').value = sessionName;
@@ -939,48 +920,18 @@ CURRENT window text: ${w.text}`;
       const lastEnd = windows.length ? windows[windows.length - 1].endSec || 0 : 0;
       sessionStart = Date.now() - lastEnd * 1000;
       lastCutAt = Date.now();
-      currentLectureId = lectureId || null;
       currentLocalSessionId = localId || null;
+      unsaved = false;
 
       const lastShownWin = [...windows].reverse().find(w => w.image && w.imageVerdict === 'approved');
-      projectorNow = lastApprovedImage || (lastShownWin ? { topic: lastShownWin.topic, image: lastShownWin.image } : null);
+      projectorNow = lastShownWin ? { topic: lastShownWin.topic, image: lastShownWin.image } : null;
       renderDisplay();
       updateStats();
       alertBox('Resumed – press Start to keep recording.');
     }
 
-    async function resumeFromCloud(id) {
-      const detail = await CT.getLectureDetail(id);
-      if (!detail || !detail.lecture) { alertBox('Could not load that lecture.'); return; }
-      const { lecture, windows: dbWindows, images } = detail;
-      const imagesByWindow = {};
-      images.forEach(img => { (imagesByWindow[img.window_id] = imagesByWindow[img.window_id] || []).push(img); });
-
-      const windowsData = dbWindows.map(w => {
-        const lastImg = (imagesByWindow[w.id] || []).slice(-1)[0];
-        return {
-          index: w.window_index, startSec: w.start_sec, endSec: w.end_sec, text: w.transcript_text,
-          topic: w.topic, keywords: w.keywords, confidence: w.confidence, onTopic: w.on_topic,
-          model: w.model, latencyMs: w.latency_ms, verdict: w.verdict, correctTopic: w.correct_topic,
-          imageQuery: w.image_query, imageVerdict: w.image_verdict, imageTries: w.image_tries,
-          imageShown: lastImg?.title,
-          image: lastImg ? { src: lastImg.public_url || lastImg.source_url, page: lastImg.source_page, title: lastImg.title, artist: lastImg.artist, license: lastImg.license } : undefined,
-          _dbId: w.id
-        };
-      });
-
-      const lastImg = images[images.length - 1];   // most recently approved overall
-      const lastApprovedImage = lastImg ? {
-        topic: lastImg.topic || '',
-        image: { src: lastImg.public_url || lastImg.source_url, page: lastImg.source_page, title: lastImg.title, artist: lastImg.artist, license: lastImg.license }
-      } : null;
-
-      resumeSession({ subject: lecture.subject, model: lecture.model, windowsData, lectureId: lecture.id, lastApprovedImage });
-    }
-
     function resumeFromLocal(id) {
-      const sessions = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
-      const s = sessions.find(x => x.id === id);
+      const s = CT.loadSessions().find(x => x.id === id);
       if (!s) { alertBox('Could not find that saved session.'); return; }
       resumeSession({ subject: s.subject, sessionName: s.name, windowsData: s.windows || [], localId: s.id });
     }
@@ -996,11 +947,8 @@ CURRENT window text: ${w.text}`;
       // onAuthStateChange can fire again later (token refresh, etc.) and must not re-run this.
       if (loggedIn && !resumeHandled) {
         resumeHandled = true;
-        const params = new URLSearchParams(location.search);
-        const resumeCloudId = params.get('resumeCloud');
-        const resumeLocalId = params.get('resumeLocal');
-        if (resumeCloudId) resumeFromCloud(resumeCloudId);
-        else if (resumeLocalId) resumeFromLocal(Number(resumeLocalId));
+        const resumeLocalId = new URLSearchParams(location.search).get('resumeLocal');
+        if (resumeLocalId) resumeFromLocal(Number(resumeLocalId));
       }
     }
     let resumeHandled = false;
@@ -1010,7 +958,10 @@ CURRENT window text: ${w.text}`;
       try { await CT.signInWithGoogle(); }
       catch (err) { document.getElementById('authError').textContent = 'Sign-in failed: ' + err.message; }
     };
-    document.getElementById('signOutBtn').onclick = () => CT.signOut();
+    document.getElementById('signOutBtn').onclick = () => {
+      if ((unsaved || listening) && !confirm('You have windows that haven’t been saved. Sign out anyway?')) return;
+      CT.signOut();
+    };
 
     if (!CT.ready) {
       setAuthView(false);

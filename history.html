@@ -70,12 +70,12 @@
     function renderList() {
       listEl.innerHTML = '';
 
-      // --- localStorage sessions (always available) ---
-      const local = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
+      // Sessions saved in this browser by the signed-in teacher only
+      const local = CT.loadSessions();
       if (local.length) {
         const heading = document.createElement('span');
         heading.className = 'section-label';
-        heading.textContent = `Locally saved sessions · ${local.length}`;
+        heading.textContent = `Your saved sessions · ${local.length}`;
         listEl.appendChild(heading);
         [...local].reverse().forEach(s => {
           const div = document.createElement('div');
@@ -87,8 +87,8 @@
             <div class="row-head">
               <div class="date-badge"><span class="mon">${d.toLocaleString('en', { month: 'short' })}</span><span class="day">${d.getDate()}</span></div>
               <div class="row-main">
-                <span class="session-name">${s.name}</span>
-                <span class="sub">${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${s.subject || 'no subject'} · ${wins} windows</span>
+                <span class="session-name">${escapeHtml(s.name)}</span>
+                <span class="sub">${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${escapeHtml(s.subject || 'no subject')} · ${wins} windows</span>
               </div>
               <span class="row-actions">
                 <button class="continue-btn" data-id="${s.id}" title="Resume this lecture">Continue</button>
@@ -97,7 +97,7 @@
               </span>
             </div>
             <div class="rename-form" id="rename-${s.id}" style="display:none">
-              <input class="rename-input" data-id="${s.id}" value="${s.name}" />
+              <input class="rename-input" data-id="${s.id}" value="${escapeHtml(s.name)}" />
               <button class="rename-save" data-id="${s.id}">Save</button>
               <button class="rename-cancel" data-id="${s.id}">Cancel</button>
             </div>`;
@@ -126,8 +126,10 @@
     }
 
     function deleteLocal(id) {
-      const sessions = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
-      localStorage.setItem('classroomSessions', JSON.stringify(sessions.filter(s => s.id !== id)));
+      const sessions = CT.loadSessions();
+      const s = sessions.find(x => x.id === id);
+      if (!s || !confirm(`Delete “${s.name}”? This can’t be undone.`)) return;
+      CT.storeSessions(sessions.filter(x => x.id !== id));
       renderList();
     }
 
@@ -143,10 +145,10 @@
       const form = document.getElementById('rename-' + id);
       const newName = form?.querySelector('.rename-input')?.value.trim();
       if (!newName) return;
-      const sessions = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
+      const sessions = CT.loadSessions();
       const s = sessions.find(x => x.id === id);
       if (s) s.name = newName;
-      localStorage.setItem('classroomSessions', JSON.stringify(sessions));
+      CT.storeSessions(sessions);
       renderList();
     }
 
@@ -156,8 +158,7 @@
     }
 
     function openLocal(id) {
-      const sessions = JSON.parse(localStorage.getItem('classroomSessions') || '[]');
-      const s = sessions.find(x => x.id === id);
+      const s = CT.loadSessions().find(x => x.id === id);
       if (!s) return;
       listView.style.display = 'none';
       detailView.style.display = 'flex';
@@ -165,8 +166,8 @@
       const d = new Date(s.date);
       const spoken = spokenWindows(s);   // silent windows are left out of history
       document.getElementById('detailHead').innerHTML =
-        `<h1 class="detail-title">${s.name}</h1>
-         <div class="detail-meta">${s.subject ? s.subject + ' · ' : ''}${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${spoken.length} windows</div>`;
+        `<h1 class="detail-title">${escapeHtml(s.name)}</h1>
+         <div class="detail-meta">${s.subject ? escapeHtml(s.subject) + ' · ' : ''}${d.toLocaleDateString()} ${d.toLocaleTimeString()} · ${spoken.length} windows</div>`;
       const tl = document.getElementById('timeline');
       tl.innerHTML = '';
       const mm = sec => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -174,12 +175,12 @@
         const div = document.createElement('div');
         div.className = 'tl-item';
         let body = '';
-        if (w.topic) body += `<span class="tl-topic${w.onTopic === false ? ' chat' : ''}">${w.topic}</span>`;
-        if (w.keywords?.length) body += `<div class="chips">${w.keywords.map(k => `<span class="chip">${k}</span>`).join('')}</div>`;
-        body += `<span class="tl-text">${w.text}</span>`;
+        if (w.topic) body += `<span class="tl-topic${w.onTopic === false ? ' chat' : ''}">${escapeHtml(w.topic)}</span>`;
+        if (w.keywords?.length) body += `<div class="chips">${w.keywords.map(k => `<span class="chip">${escapeHtml(k)}</span>`).join('')}</div>`;
+        body += `<span class="tl-text">${escapeHtml(w.text)}</span>`;
         const foot = [];
-        if (w.verdict) foot.push(`<span>Judged: ${w.verdict === 'correct' ? 'correct' : 'wrong – ' + (w.correctTopic || '?')}</span>`);
-        if (w.imageShown) foot.push(`<span>Image shown: ${w.imageShown}</span>`);
+        if (w.verdict) foot.push(`<span>Judged: ${w.verdict === 'correct' ? 'correct' : 'wrong – ' + escapeHtml(w.correctTopic || '?')}</span>`);
+        if (w.imageShown) foot.push(`<span>Image shown: ${escapeHtml(w.imageShown)}</span>`);
         body += `<div class="tl-foot">${foot.join('')}</div>`;
         div.innerHTML = `<span class="tl-time">${mm(w.startSec)} – ${mm(w.endSec)}</span>
           <div class="tl-rail"><span class="tl-dot"></span><span class="tl-line"></span></div>
