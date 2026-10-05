@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Consult Visuals – Patient screen</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    html, body { margin: 0; height: 100%; background: #F4F3EE; color: #16211B; font-family: 'Hanken Grotesk', system-ui, sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+    #stage { height: 100%; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 4vw; padding: 5vh 4vw; box-sizing: border-box; }
+    #frame { display: flex; align-items: center; justify-content: center; min-height: 0; background: #fff; border-radius: 18px; padding: 2vh; }
+    #img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity .5s ease; }
+    #img.visible { opacity: 1; }
+    #info { display: flex; flex-direction: column; justify-content: center; gap: 2.4vh; min-width: 0; }
+    #label { font-size: 1.7vh; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #2E7A5A; }
+    #plain { font-family: 'Instrument Serif', Georgia, serif; font-size: 6.4vh; line-height: 1.05; margin: 0; }
+    #name { font-size: 2.1vh; color: #6B716C; }
+    #text { font-size: 3vh; line-height: 1.5; color: #2E3833; margin: 0; text-wrap: pretty; }
+    #credit { font-size: 1.4vh; color: #8A8F8B; }
+    #waiting { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; text-align: center; padding: 24px; }
+    .logo { width: 72px; height: 72px; border-radius: 18px; background: #1A5C3A; color: #fff; display: flex; align-items: center; justify-content: center; font: italic 38px 'Instrument Serif', Georgia, serif; }
+    #waiting span { font-size: 3.2vh; color: #4E5751; max-width: 640px; line-height: 1.4; }
+    body:not(.showing) #stage { visibility: hidden; }
+    body.showing #waiting { display: none; }
+    #hint { position: fixed; top: 14px; right: 18px; font-size: 13px; color: #8A8F8B; transition: opacity 1s; }
+    body.fs #hint { opacity: 0; }
+    @media (max-aspect-ratio: 1/1) {   /* tablet held upright */
+      #stage { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1.2fr) auto; }
+      #plain { font-size: 4.6vh; } #text { font-size: 2.3vh; }
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div id="frame"><img id="img" alt=""></div>
+    <div id="info">
+      <span id="label">What your doctor is explaining</span>
+      <h1 id="plain"></h1>
+      <span id="name"></span>
+      <p id="text"></p>
+      <span id="credit"></span>
+    </div>
+  </div>
+  <div id="waiting"><div class="logo">Cv</div><span>Your doctor will show pictures here to help explain.</span></div>
+  <div id="hint">Turn this screen towards the patient, then press <b>F</b> or double-click for fullscreen</div>
+
+  <script>
+    // Receives doctor-approved conditions from the consultation page (index.html) – same computer, same browser
+    const channel = new BroadcastChannel('consult-visuals');
+    const img = document.getElementById('img');
+    const set = (id, v) => { document.getElementById(id).textContent = v; };
+
+    function show(msg) {
+      img.classList.remove('visible');
+      const next = new Image();
+      next.onload = () => {                         // swap only once the new image has loaded
+        img.src = next.src;
+        requestAnimationFrame(() => img.classList.add('visible'));
+        document.body.classList.add('showing');
+        set('plain', msg.plain);
+        set('name', msg.name);
+        set('text', msg.text);
+        const i = msg.image;
+        set('credit', `Image: ${i.title}${i.artist ? ' – ' + i.artist : ''}${i.license ? ' · ' + i.license : ''} · Wikimedia Commons`);
+      };
+      next.src = msg.image.src;
+    }
+
+    function clear() {
+      img.classList.remove('visible');
+      document.body.classList.remove('showing');
+      ['plain', 'name', 'text', 'credit'].forEach(id => set(id, ''));
+    }
+
+    channel.onmessage = e => {
+      if (e.data?.type === 'show') show(e.data);
+      if (e.data?.type === 'clear') clear();
+    };
+
+    // Tell the consultation page we're here (it replies with what to show), and keep saying so
+    const hello = () => channel.postMessage({ type: 'hello' });
+    hello();
+    setInterval(hello, 3000);
+
+    function toggleFullscreen() {
+      document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    }
+    document.addEventListener('keydown', e => { if (e.key.toLowerCase() === 'f') toggleFullscreen(); });
+    document.addEventListener('dblclick', toggleFullscreen);
+    document.addEventListener('fullscreenchange', () => document.body.classList.toggle('fs', !!document.fullscreenElement));
+  </script>
+</body>
+</html>

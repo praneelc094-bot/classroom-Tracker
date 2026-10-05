@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your visit – handout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #F4F3EE; color: #16211B; font-family: 'Hanken Grotesk', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    .toolbar { position: sticky; top: 0; display: flex; gap: 10px; justify-content: center; padding: 12px; background: #fff; border-bottom: 1px solid #E4E2DA; }
+    .toolbar button { height: 40px; padding: 0 20px; border-radius: 10px; border: 1px solid #D9D7CE; background: #fff; font: 600 14px 'Hanken Grotesk', sans-serif; cursor: pointer; }
+    .toolbar .primary { background: #1A5C3A; border: none; color: #fff; }
+    .sheet { max-width: 780px; margin: 24px auto; background: #fff; padding: 40px 48px; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+    header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; border-bottom: 2px solid #1A5C3A; padding-bottom: 14px; }
+    .clinic { font-family: 'Instrument Serif', Georgia, serif; font-size: 30px; line-height: 1.1; }
+    .meta { font-size: 13px; color: #6B716C; text-align: right; line-height: 1.6; }
+    h2 { font-size: 14px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #2E7A5A; margin: 26px 0 4px; }
+    .item { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 22px; padding: 20px 0; border-bottom: 1px solid #ECEAE3; break-inside: avoid; }
+    .item img { width: 100%; max-height: 220px; object-fit: contain; border: 1px solid #E4E2DA; border-radius: 8px; background: #fff; }
+    .plain { font-family: 'Instrument Serif', Georgia, serif; font-size: 26px; line-height: 1.1; margin: 0; }
+    .name { font-size: 13px; color: #6B716C; margin: 4px 0 10px; }
+    .text { font-size: 15px; line-height: 1.6; margin: 0; }
+    .notes { margin-top: 26px; border: 1px dashed #D9D7CE; border-radius: 8px; min-height: 110px; padding: 10px 14px; font-size: 13px; color: #8A8F8B; }
+    .disclaimer { margin-top: 22px; font-size: 12px; color: #6B716C; line-height: 1.5; }
+    .credits { margin-top: 10px; font-size: 10px; color: #8A8F8B; line-height: 1.5; }
+    .missing { max-width: 520px; margin: 80px auto; text-align: center; font-size: 16px; color: #4E5751; line-height: 1.5; }
+    @media (max-width: 640px) { .sheet { padding: 24px 18px; } .item { grid-template-columns: 1fr; } }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .sheet { margin: 0; padding: 0; box-shadow: none; max-width: none; }
+      @page { margin: 16mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button class="primary" onclick="window.print()">Print / save as PDF</button><button onclick="window.close()">Close</button></div>
+  <div id="root"></div>
+
+  <script>
+    // The handout comes straight from the open consultation page, so nothing about the patient is stored
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let h = null;
+    try { h = window.opener?.currentHandout?.(); } catch { /* opener closed or from another site */ }
+
+    const root = document.getElementById('root');
+    if (!h || !h.items.length) {
+      root.innerHTML = '<p class="missing">Open the handout from the consultation screen with <b>Print handout</b>, after showing the patient at least one condition.</p>';
+      document.querySelector('.toolbar .primary').style.display = 'none';
+    } else {
+      const d = new Date(h.date);
+      root.innerHTML = `
+        <div class="sheet">
+          <header>
+            <div class="clinic">${esc(h.clinicName || 'Your visit')}</div>
+            <div class="meta">${d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}${h.patientRef ? '<br>Patient: ' + esc(h.patientRef) : ''}</div>
+          </header>
+          <h2>What we talked about today</h2>
+          ${h.items.map(i => `
+            <div class="item">
+              <img src="${esc(i.image.src)}" alt="">
+              <div>
+                <p class="plain">${esc(i.plain)}</p>
+                <p class="name">${esc(i.name)}</p>
+                <p class="text">${esc(i.text)}</p>
+              </div>
+            </div>`).join('')}
+          <div class="notes">Doctor’s notes:</div>
+          <p class="disclaimer">This sheet explains, in simple words, what your doctor discussed with you. It is not a full diagnosis or a treatment plan. Always follow the advice your doctor gives you, and contact the clinic if your symptoms get worse.</p>
+          <p class="credits">Images from Wikimedia Commons: ${h.items.map(i => esc(i.image.title + (i.image.artist ? ' – ' + i.image.artist : '') + (i.image.license ? ' (' + i.image.license + ')' : ''))).join('; ')}.</p>
+        </div>`;
+    }
+  </script>
+</body>
+</html>

@@ -1,22 +1,20 @@
 // ============================================================
-//  Classroom Tracker – shared helpers for index.html and history.html
-//  - Google sign-in through Supabase Auth (the only thing Supabase is used for now)
-//  - Topic detection through the "detect-topic" Supabase Edge Function, which keeps the
-//    OpenRouter key on the server (see supabase/functions/detect-topic/index.ts)
-//  - Saved sessions, kept in this browser and separated per signed-in teacher
+//  Consult Visuals – shared helpers
+//  - Google sign-in for doctors through Supabase Auth
+//  - Each doctor's library choices (approved images, edited text) and settings, kept in this
+//    browser under that doctor's account. Nothing about patients is ever stored.
 //
 //  Requires config.js to define SUPABASE_URL and SUPABASE_ANON_KEY, and the Supabase JS
 //  library to be loaded before this file.
 // ============================================================
 
-// Anything that came from speech, a pasted transcript, an AI reply, Wikimedia or a typed
-// session name goes through this before being put into the page as HTML.
+// Anything from Wikimedia or typed by the doctor goes through this before being put into the page as HTML.
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // Switch the page between the full-screen sign-in view and the app. Until the first call the
-// body stays "auth-pending" and shows neither, so signed-in teachers never see a sign-in flash.
+// body stays "auth-pending" and shows neither, so signed-in doctors never see a sign-in flash.
 function setAuthView(loggedIn) {
   document.body.classList.remove('auth-pending');
   document.body.classList.toggle('signed-in', loggedIn);
@@ -41,18 +39,20 @@ const SIGN_IN_ERROR = (() => {
   return hash.has('access_token') ? '' : msg;   // fresh tokens next to a stale error: the sign-in worked
 })();
 
-const CT = (() => {
+const CV = (() => {
   const url = (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : '').trim();
   const key = (typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : '').trim();
   const ready = !!(url && key && window.supabase);
   const client = ready ? window.supabase.createClient(url, key) : null;
 
   // ---------- Sign-in ----------
+  let userId = null;
+
   function onAuthChange(callback) {
     if (!ready) return;
     client.auth.onAuthStateChange((_event, session) => {
       const user = session?.user || null;
-      useSessionsOf(user);
+      userId = user?.id || null;
       callback(user);
     });
   }
@@ -61,61 +61,22 @@ const CT = (() => {
     if (!ready) return;
     // prompt=select_account makes Google show its account chooser every time, instead of
     // silently reusing whichever Google account the browser is already signed in to
-    await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: signInReturnUrl(), queryParams: { prompt: 'select_account' } } });
-  }
-
-  // Come back to this page, keeping only a pending Continue (?resumeLocal) and dropping
-  // anything else in the address, such as an error left by an earlier attempt
-  function signInReturnUrl() {
-    const back = new URL(location.origin + location.pathname);
-    const resume = new URLSearchParams(location.search).get('resumeLocal');
-    if (resume) back.searchParams.set('resumeLocal', resume);
-    return back.toString();
+    await client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: 'select_account' } } });
   }
 
   async function signOut() {
-    if (!ready) return;
-    await client.auth.signOut();
+    if (ready) await client.auth.signOut();
   }
 
-  // ---------- Saved sessions (this browser, one list per teacher) ----------
-  const LEGACY_KEY = 'classroomSessions';   // before sessions were kept per teacher
-  let sessionsKey = null;
+  // ---------- Per-doctor storage in this browser ----------
+  const read = name => { try { return JSON.parse(localStorage.getItem(name + ':' + userId) || '{}'); } catch { return {}; } };
+  const write = (name, value) => { if (userId) localStorage.setItem(name + ':' + userId, JSON.stringify(value)); };
 
-  function useSessionsOf(user) {
-    sessionsKey = user ? LEGACY_KEY + ':' + user.id : null;
-    // Sessions saved before this change had no owner: hand them to the first teacher who signs in
-    const legacy = user && localStorage.getItem(LEGACY_KEY);
-    if (legacy) {
-      const mine = JSON.parse(localStorage.getItem(sessionsKey) || '[]');
-      const ids = new Set(mine.map(s => s.id));
-      localStorage.setItem(sessionsKey, JSON.stringify([...mine, ...JSON.parse(legacy).filter(s => !ids.has(s.id))]));
-      localStorage.removeItem(LEGACY_KEY);
-    }
-  }
-
-  function loadSessions() {
-    return sessionsKey ? JSON.parse(localStorage.getItem(sessionsKey) || '[]') : [];
-  }
-
-  function storeSessions(list) {
-    if (sessionsKey) localStorage.setItem(sessionsKey, JSON.stringify(list));
-  }
-
-  // ---------- Topic detection (server-side, so the OpenRouter key never reaches the browser) ----------
-  async function detectTopic(payload) {
-    if (!ready) throw new Error('Supabase isn’t configured in config.js');
-    const { data, error } = await client.functions.invoke('detect-topic', { body: payload });
-    if (!error) return data;
-    let msg = error.message;
-    const status = error.context?.status;
-    try { msg = (await error.context.json()).error || msg; } catch { /* not a JSON body */ }
-    const err = new Error(status === 404 || error.name === 'FunctionsFetchError'
-      ? 'Topic detection isn’t set up yet – deploy the detect-topic function'
-      : msg);
-    err.notDeployed = status === 404 || error.name === 'FunctionsFetchError';
-    throw err;
-  }
-
-  return { ready, onAuthChange, signInWithGoogle, signOut, useSessionsOf, loadSessions, storeSessions, detectTopic };
+  return {
+    ready, onAuthChange, signInWithGoogle, signOut,
+    // { [conditionId]: { image, reviewed, text } }
+    loadLibrary: () => read('cvLibrary'), storeLibrary: lib => write('cvLibrary', lib),
+    // { clinicName }
+    loadSettings: () => read('cvSettings'), storeSettings: s => write('cvSettings', s),
+  };
 })();
